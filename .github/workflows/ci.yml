@@ -26,17 +26,14 @@ jobs:
 
     - name: Lint code with flake8
       run: |
-        # Stop the build if there are critical Python syntax errors or undefined names
         flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
-        # Treat style and formatting issues as warnings to help keep the team's code clean
         flake8 src/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Run Tests with Coverage
       run: |
-        $env:PYTHONPATH="src"
+        export PYTHONPATH="src"
         coverage run --source=src -m unittest discover -s tests -p "test_*.py" -v
 
     - name: Generate Coverage Report
       run: |
-        # Print a detailed terminal report showing which lines are missing tests
         coverage report -m
