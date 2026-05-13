@@ -12,12 +12,10 @@ class TestCourse(unittest.TestCase):
         self.course = Course("Algorithms", "CS101", "Dr. Cohen", [self.prog], "Exam")
 
     def test_valid_evaluation(self):
-        # should work fine with valid evaluation
         c = Course("Math", "MATH01", "Dr. Levi", [self.prog], "Project")
         self.assertEqual(c.evaluation, "Project")
 
     def test_invalid_evaluation_raises_error(self):
-        # should throw ValueError for bad evaluation
         with self.assertRaises(ValueError):
             Course("Bad Course", "BAD01", "Dr. X", [self.prog], "Whatever")
 
@@ -38,6 +36,24 @@ class TestCourse(unittest.TestCase):
     def test_hash_same_id(self):
         same = Course("Algorithms", "CS101", "someone else", [self.prog], "Exam")
         self.assertEqual(hash(self.course), hash(same))
+
+    # --- NEW TESTS BELOW ---
+
+    def test_multiple_programs(self):
+        prog2 = Program("SE-BSc", 2, "FALL", "Elective")
+        c = Course("Multi", "MUL01", "Dr. Z", [self.prog, prog2], "Exam")
+        self.assertEqual(len(c.programs), 2)
+
+    def test_equality_different_type(self):
+        self.assertFalse(self.course == "Not a course string")
+
+    def test_equality_different_id(self):
+        other = Course("Algorithms", "CS102", "Dr. Cohen", [self.prog], "Exam")
+        self.assertNotEqual(self.course, other)
+
+    def test_hash_different_id(self):
+        other = Course("Algorithms", "CS102", "Dr. Cohen", [self.prog], "Exam")
+        self.assertNotEqual(hash(self.course), hash(other))
 
 if __name__ == "__main__":
     unittest.main()
