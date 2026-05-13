@@ -55,29 +55,35 @@ class BacktrackScheduler(Scheduler):
             print("[Scheduler] No available exam dates found.")
             return []
 
-        # Sort courses to improve backtracking efficiency:
+        # Convert courses into (Course, Moed) scheduling requirements
+        courses_to_schedule = []
+        for course in exam_courses:
+            courses_to_schedule.append((course, "Aleph"))
+            courses_to_schedule.append((course, "Bet"))
+
+        # Sort requirements to improve backtracking efficiency:
         # Courses that belong to more programs (harder to place) go first.
-        sorted_courses = sorted(exam_courses, key=lambda c: -len(c.programs))
+        sorted_requirements = sorted(courses_to_schedule, key=lambda req: -len(req[0].programs))
 
         self._start_time = time.time()
         self._time_exceeded = False
         results = []
 
-        self._backtrack(sorted_courses, 0, {}, all_dates, results)
+        self._backtrack(sorted_requirements, 0, {}, all_dates, results)
 
         if self._time_exceeded:
             print(f"[Scheduler] Time limit reached. Returning {len(results)} schedules found so far.")
 
         return results
 
-    def _backtrack(self, courses: list, index: int, current_assignments: dict,
+    def _backtrack(self, requirements: list, index: int, current_assignments: dict,
                    available_dates: list, results: list):
         """
         Recursive backtracking core.
 
-        :param courses: Full ordered list of courses to schedule.
-        :param index: Index of the course currently being placed.
-        :param current_assignments: Dict of {Course: ExamDate} built so far.
+        :param requirements: Full ordered list of (Course, Target_Moed) tuples.
+        :param index: Index of the requirement currently being placed.
+        :param current_assignments: Dict of {(Course, Moed): ExamDate} built so far.
         :param available_dates: All available ExamDate objects to try.
         :param results: Accumulated list of complete valid schedules.
         """
@@ -86,17 +92,24 @@ class BacktrackScheduler(Scheduler):
             self._time_exceeded = True
             return
 
-        # Base case: all courses have been placed — record this valid schedule
-        if index == len(courses):
+        # Base case: all requirements have been placed — record this valid schedule
+        if index == len(requirements):
             schedule = Schedule()
-            for course, exam_date in current_assignments.items():
-                schedule.add_assignment(course, exam_date)
+            for (course, moed), exam_date in current_assignments.items():
+                schedule.add_assignment(course, moed, exam_date)
             results.append(schedule)
             return
 
-        course = courses[index]
+        course, target_moed = requirements[index]
+
+        # Only place this course on dates matching its semester (FALL/SPRI/SUMM)
+        course_semesters = {prog.semester for prog in course.programs}
 
         for exam_date in available_dates:
+            # Check for correct semester AND the correct Moed for this requirement
+            if exam_date.semester not in course_semesters or exam_date.moed != target_moed:
+                continue
+            
             # Check time limit inside the inner loop too (tight loop for large date sets)
             if self._time_exceeded:
                 return
@@ -104,9 +117,9 @@ class BacktrackScheduler(Scheduler):
             # Check if placing this course on this date causes any conflict with
             # already-placed courses. If not, recurse.
             if self._is_compatible(course, exam_date, current_assignments):
-                current_assignments[course] = exam_date
-                self._backtrack(courses, index + 1, current_assignments, available_dates, results)
-                del current_assignments[course]  # Undo (backtrack)
+                current_assignments[(course, target_moed)] = exam_date
+                self._backtrack(requirements, index + 1, current_assignments, available_dates, results)
+                del current_assignments[(course, target_moed)]  # Undo (backtrack)
 
     def _is_compatible(self, course, exam_date, current_assignments: dict) -> bool:
         """
@@ -119,7 +132,7 @@ class BacktrackScheduler(Scheduler):
         """
         date_key = exam_date.date.date()
 
-        for placed_course, placed_date in current_assignments.items():
+        for (placed_course, placed_moed), placed_date in current_assignments.items():
             if placed_date.date.date() != date_key:
                 continue  # Different date — no conflict possible
 

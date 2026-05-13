@@ -67,7 +67,7 @@ class OutputWriter:
 
         # Group assignments by (semester, moed)
         groups = {}
-        for course, exam_date in schedule.assignments.items():
+        for (course, target_moed), exam_date in schedule.assignments.items():
             key = (exam_date.semester, exam_date.moed)
             groups.setdefault(key, []).append((course, exam_date))
 

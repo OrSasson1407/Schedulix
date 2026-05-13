@@ -1,0 +1,20 @@
+﻿name: Basic CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Run status check
+      run: |
+        echo "Starting CI/CD check for Schedulix..."
+        echo "Pipeline ran successfully!"
