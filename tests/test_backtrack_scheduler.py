@@ -13,7 +13,7 @@ class BacktrackScheduler(unittest.TestCase):
     def setUp(self):
         self.scheduler = TargetBacktrackScheduler()
         p1 = Program("83101", 1, "FALL", "Obligatory")
-        self.course1 = Course("Calculus 1", "83112", "Dr. Erez", [p1], "Exam")
+        self.course1 = Course("Calculus 1",  "83112", "Dr. Erez", [p1], "Exam")
         self.course2 = Course("Physics 1", "83102", "Prof. Some", [p1], "Exam")
         self.period = ExamPeriod("FALL", "Aleph", "29-01-2026", "30-01-2026")
 
