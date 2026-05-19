@@ -28,7 +28,7 @@ class BacktrackScheduler(unittest.TestCase):
 
     def test_no_exam_courses(self):
         p1 = Program("83101", 1, "FALL", "Obligatory")
-        project_course = Course("Project", "83533", "Dr. Bell", [p1], "Project")
+        project_course = Course("Project","83533", "Dr. Bell", [p1], "Project")
         schedules = self.scheduler.generate([project_course], [self.period])
         self.assertEqual(len(schedules), 0, "Should return empty list for non-exam courses.")
 
