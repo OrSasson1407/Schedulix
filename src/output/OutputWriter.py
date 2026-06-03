@@ -22,7 +22,7 @@ class OutputWriter:
     SEMESTER_ORDER = {"FALL": 1, "SPRI": 2, "SUMM": 3}
     MOED_ORDER = {"Aleph": 1, "Bet": 2, "Gimel": 3}
 
-    def write(self, schedules: list, output_path: str, selected_programs: list = None):
+    def write(self, schedules, output_path: str, selected_programs: list = None):
         """
         Writes all schedules to a text file.
 
@@ -30,6 +30,7 @@ class OutputWriter:
         :param output_path: File path for the output file.
         :param selected_programs: Optional list of selected program IDs for the header.
         """
+        schedules = list(schedules) if schedules is not None else []
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(self._build_header(schedules, selected_programs))
             if not schedules:

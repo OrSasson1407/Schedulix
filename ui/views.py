@@ -1,0 +1,1090 @@
+"""
+Server-side HTML rendering for Schedulix (Python + CSS only).
+This module is responsible for generating the entire HTML structure of the application.
+Although the UI primarily relies on traditional form submissions and links handled by app.py,
+a small JavaScript layer is included to intercept forms and handle them via AJAX (fetch)
+for a smoother, flicker-free user experience.
+"""
+
+from __future__ import annotations
+
+import html
+from datetime import datetime
+from urllib.parse import urlencode
+
+# ==========================================
+# CONSTANTS & CONFIGURATIONS
+# ==========================================
+
+# Mapping of program IDs to their full names
+PROGRAM_NAMES = {
+    "83101": "Computer Engineering",
+    "83102": "Electrical Engineering",
+    "83104": "Industrial & Information Systems",
+    "83107": "Data Engineering",
+    "83108": "Software Engineering",
+    "83109": "Materials Engineering",
+    "83105": "Computer Engineering – Computer Hardware",
+    "83182": "Electrical Engineering – Quantum Engineering",
+    "83103": "Electrical Engineering – Neuro Engineering",
+    "83115": "Electrical Engineering – Bio-Medical Engineering",
+}
+
+# Titles displayed at the top bar for each main screen
+SCREEN_TITLES = {
+    "input": "<strong>Input</strong> — Load files &amp; select programs",
+    "calendar": "<strong>Calendar</strong> — Moed Aleph &amp; Moed Bet date configuration",
+    "output": "<strong>Output</strong> — Browse &amp; export combined schedules",
+}
+
+# Steps used for the quick pagination buttons in the output screen (e.g., jump 10 pages forward)
+PAGE_JUMP_STEPS = [1, 2, 3, 5, 10, 20, 50, 100, 200, 500, 1000]
+
+# Predefined date ranges for major holidays to quickly exclude them from the exam calendar
+HOLIDAY_PRESETS = {
+    "rosh_hashana": {
+        "label": "Rosh Hashana",
+        "ranges": [
+            ("2024-10-02", "2024-10-04"),
+            ("2025-09-22", "2025-09-24"),
+            ("2026-09-11", "2026-09-13"),
+            ("2027-10-01", "2027-10-03"),
+        ],
+    },
+    "yom_kippur": {
+        "label": "Yom Kippur",
+        "ranges": [
+            ("2024-10-11", "2024-10-12"),
+            ("2025-10-01", "2025-10-02"),
+            ("2026-09-20", "2026-09-21"),
+            ("2027-10-10", "2027-10-11"),
+        ],
+    },
+    "sukkot": {
+        "label": "Sukkot",
+        "ranges": [
+            ("2024-10-16", "2024-10-23"),
+            ("2025-10-06", "2025-10-13"),
+            ("2026-09-25", "2026-10-02"),
+            ("2027-10-15", "2027-10-22"),
+        ],
+    },
+    "pesach": {
+        "label": "Passover",
+        "ranges": [
+            ("2025-04-12", "2025-04-20"),
+            ("2026-04-01", "2026-04-09"),
+            ("2027-04-21", "2027-04-29"),
+        ],
+    },
+    "shavuot": {
+        "label": "Shavuot",
+        "ranges": [
+            ("2025-06-01", "2025-06-03"),
+            ("2026-05-21", "2026-05-23"),
+            ("2027-06-10", "2027-06-12"),
+        ],
+    },
+    "independence": {
+        "label": "Independence Day",
+        "ranges": [
+            ("2025-04-30", "2025-04-30"),
+            ("2026-04-22", "2026-04-22"),
+            ("2027-05-12", "2027-05-12"),
+        ],
+    },
+}
+
+DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+LOGO_URL = "/public/SchedulixLogo.jpeg"
+
+
+# ==========================================
+# UTILITY FUNCTIONS
+# ==========================================
+
+def _e(s) -> str:
+    """
+    Escapes a string for safe HTML rendering to prevent XSS (Cross-Site Scripting) attacks.
+    Converts characters like '<' to '&lt;'.
+    """
+    return html.escape(str(s)) if s is not None else ""
+
+
+def _url(screen: str, **params) -> str:
+    """
+    Constructs a URL string with query parameters.
+    Example: _url('output', page=2) -> '/?screen=output&page=2'
+    Filters out parameters that are None or empty strings.
+    """
+    q = {"screen": screen, **{k: v for k, v in params.items() if v is not None and v != ""}}
+    return "/?" + urlencode(q)
+
+
+def _hidden_fields(fields: dict) -> str:
+    """
+    Generates HTML hidden input fields from a dictionary.
+    Useful for passing state data through forms.
+    """
+    return "".join(
+        f'<input type="hidden" name="{_e(k)}" value="{_e(v)}"/>'
+        for k, v in fields.items()
+    )
+
+
+# ==========================================
+# MAIN LAYOUT RENDERING
+# ==========================================
+
+def render_page(ctx: dict) -> str:
+    """
+    The main entry point for rendering the entire HTML document.
+    It takes a context dictionary ('ctx') containing all the data needed for the current state,
+    determines which screen to show, and wraps it in the master HTML layout.
+    """
+    # Determine the current screen (defaults to 'input')
+    screen = ctx.get("screen", "input")
+    
+    # Handle flash messages (toast notifications like "Saved successfully" or "Error")
+    flash = ctx.get("flash")
+    flash_html = ""
+    if flash and flash.get("msg"):
+        cls = "show " + ("ok" if flash.get("type") == "ok" else "err")
+        flash_html = f'<div id="toast" class="{cls}">{_e(flash["msg"])}</div>'
+    else:
+        flash_html = '<div id="toast"></div>'
+
+    # Determine system status based on loaded files
+    status_ok = ctx.get("courses_count", 0) > 0 and ctx.get("periods_count", 0) > 0
+    dot = "dot-green" if status_ok else "dot-gray"
+    status_line = (
+        f'{ctx.get("courses_count", 0)} courses · {ctx.get("periods_count", 0)} periods · '
+        f'{len(ctx.get("selected_programs", []))} selected'
+    )
+
+    # Build the sidebar navigation links
+    nav = ""
+    for sid, icon, label in [
+        ("input", "📁", "Input"),
+        ("calendar", "📅", "Calendar"),
+        ("output", "📊", "Output"),
+    ]:
+        active = " active" if screen == sid else ""
+        nav += (
+            f'<a class="nav-item{active}" href="{_url(sid)}">'
+            f'<span class="nav-icon">{icon}</span> {label}</a>'
+        )
+
+    # Delegate body rendering to the specific screen function
+    if screen == "input":
+        body = _render_input(ctx)
+    elif screen == "calendar":
+        body = _render_calendar(ctx)
+    else:
+        body = _render_output(ctx)
+
+    # Maintain scroll position if the page reloads
+    scroll_y = int(ctx.get("content_scroll_y") or 0)
+
+    # Return the full HTML document
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Schedulix v3.0</title>
+<link rel="icon" href="{LOGO_URL}" type="image/jpeg"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+<div class="shell">
+  <nav class="sidebar">
+    <div class="logo logo-brand">
+      <img class="logo-img" src="{LOGO_URL}" alt="Schedulix logo" width="48" height="48"/>
+      <div class="logo-text">
+        <span class="logo-name">Schedulix</span>
+        <span class="logo-version">Version 3.0</span>
+      </div>
+    </div>
+    {nav}
+    <div class="sidebar-footer">
+      <div style="font-size:11px; color:var(--muted); margin-bottom:6px;">Status</div>
+      <div style="display:flex; align-items:center; font-size:12px;">
+        <span class="status-dot {dot}"></span>
+        <span style="font-size:11px; color:var(--muted);">{_e(status_line)}</span>
+      </div>
+    </div>
+  </nav>
+  
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title">{SCREEN_TITLES.get(screen, "")}</div>
+    </div>
+    <div class="content">
+      {body}
+    </div>
+  </div>
+</div>
+{flash_html}
+
+<script>
+(function () {{
+  // Helper to show popup toast notifications
+  function showToast(msg, type) {{
+    var el = document.getElementById("toast");
+    if (!el) return;
+    el.textContent = msg;
+    el.className = "show " + (type || "ok");
+    clearTimeout(el._t);
+    el._t = setTimeout(function () {{ el.className = ""; }}, 2800);
+  }}
+
+  // Wrapper for fetch requests to backend forms
+  function schedulixFetch(form) {{
+    return fetch(form.action, {{
+      method: "POST",
+      body: new FormData(form),
+      headers: {{ "X-Requested-With": "Schedulix" }},
+    }}).then(function (r) {{
+      return r.json().then(function (data) {{ return {{ ok: r.ok, data: data }}; }});
+    }});
+  }}
+
+  // Intercept program selection toggles (checkboxes/cards)
+  document.querySelectorAll("form.program-toggle-form").forEach(function (form) {{
+    form.addEventListener("submit", function (e) {{
+      e.preventDefault();
+      schedulixFetch(form)
+        .then(function (res) {{
+          if (!res.data.ok) {{
+            showToast(res.data.error || "Could not update selection", "err");
+            return;
+          }}
+          // Update the selected counter text dynamically
+          var countEl = document.getElementById("sel-count");
+          if (countEl) countEl.textContent = res.data.count;
+          
+          // Visually toggle the card state
+          var card = document.querySelector('.program-card[data-prog-id="' + res.data.prog_id + '"]');
+          if (card) {{
+            card.classList.toggle("selected", res.data.is_selected);
+            var mark = card.querySelector(".checkmark");
+            if (mark) mark.textContent = res.data.is_selected ? "\\u2713" : "";
+          }}
+        }})
+        .catch(function () {{
+          showToast("Could not update selection", "err");
+        }});
+    }});
+  }});
+
+  // Intercept the "Generate Schedules" form
+  document.querySelectorAll("form.generate-form").forEach(function (form) {{
+    form.addEventListener("submit", function (e) {{
+      e.preventDefault();
+      var btn = form.querySelector("#generateBtn");
+      var label = btn ? btn.textContent : "";
+      if (btn) {{
+        btn.disabled = true; // Disable button to prevent double-clicks
+        btn.textContent = "Generating…"; // Show loading state
+      }}
+      schedulixFetch(form)
+        .then(function (res) {{
+          if (!res.data.ok) {{
+            showToast(res.data.error || "Generate failed", "err");
+            return;
+          }}
+          // Update the UI with generation results
+          var resultEl = document.getElementById("gen-result");
+          if (resultEl) resultEl.textContent = res.data.gen_result || "";
+          var historyEl = document.getElementById("gen-history-root");
+          if (historyEl) historyEl.innerHTML = res.data.history_html || "";
+          var outLink = document.getElementById("view-output-link");
+          if (outLink) outLink.style.display = res.data.gen_result ? "inline-flex" : "none";
+          if (res.data.flash && res.data.flash.msg) {{
+            showToast(res.data.flash.msg, res.data.flash.type || "ok");
+          }}
+          // Re-bind click events for newly injected HTML
+          document.querySelectorAll("form.history-restore-form").forEach(bindHistoryRestore);
+        }})
+        .catch(function () {{
+          showToast("Generate failed", "err");
+        }})
+        .finally(function () {{
+          if (btn) {{
+            btn.disabled = false;
+            btn.textContent = label;
+          }}
+        }});
+    }});
+  }});
+
+  // Logic to restore previous schedule generations
+  function bindHistoryRestore(form) {{
+    if (form._schedulixBound) return;
+    form._schedulixBound = true;
+    form.addEventListener("submit", function (e) {{
+      e.preventDefault();
+      schedulixFetch(form)
+        .then(function (res) {{
+          if (!res.data.ok) {{
+            showToast(res.data.error || "Could not restore", "err");
+            return;
+          }}
+          // Update history panel and selection UI dynamically
+          var historyEl = document.getElementById("gen-history-root");
+          if (historyEl) historyEl.innerHTML = res.data.history_html || "";
+          var resultEl = document.getElementById("gen-result");
+          if (resultEl) resultEl.textContent = res.data.gen_result || "";
+          var outLink = document.getElementById("view-output-link");
+          if (outLink) outLink.style.display = res.data.gen_result ? "inline-flex" : "none";
+          if (typeof res.data.count === "number") {{
+            var countEl = document.getElementById("sel-count");
+            if (countEl) countEl.textContent = res.data.count;
+          }}
+          
+          // Re-select the correct programs based on the restored state
+          if (res.data.selected) {{
+            var selectedSet = {{}};
+            res.data.selected.forEach(function (id) {{ selectedSet[id] = true; }});
+            document.querySelectorAll(".program-card[data-prog-id]").forEach(function (card) {{
+              var id = card.getAttribute("data-prog-id");
+              var on = !!selectedSet[id];
+              card.classList.toggle("selected", on);
+              var mark = card.querySelector(".checkmark");
+              if (mark) mark.textContent = on ? "\\u2713" : "";
+            }});
+          }}
+          if (res.data.flash && res.data.flash.msg) {{
+            showToast(res.data.flash.msg, res.data.flash.type || "ok");
+          }}
+          document.querySelectorAll("form.history-restore-form").forEach(bindHistoryRestore);
+        }})
+        .catch(function () {{
+          showToast("Could not restore", "err");
+        }});
+    }});
+  }}
+  document.querySelectorAll("form.history-restore-form").forEach(bindHistoryRestore);
+
+  // Restore scroll position logic
+  var content = document.querySelector(".content");
+  if (!content) return;
+  var scrollY = {scroll_y};
+  if (scrollY > 0) {{
+    content.scrollTop = scrollY;
+    return;
+  }}
+  var id = location.hash;
+  if (!id) return;
+  var el = document.querySelector(id);
+  if (el) el.scrollIntoView({{ block: "start", behavior: "instant" }});
+}})();
+</script>
+</body>
+</html>"""
+
+
+# ==========================================
+# SCREEN: INPUT (File upload & Program selection)
+# ==========================================
+
+def _render_input(ctx: dict) -> str:
+    """
+    Renders the 'Input' screen.
+    Includes file upload forms (overwrite/append modes), the program selection grid,
+    the drilldown view (if a specific program is clicked), and the generate button.
+    """
+    # Determine the current file loading mode (overwrite existing data vs append to it)
+    file_mode = ctx.get("file_mode", "overwrite")
+    ow_cls = "active" if file_mode == "overwrite" else ""
+    ap_cls = "active" if file_mode == "append" else ""
+
+    # Status labels indicating if courses/periods data files have been loaded
+    cs = ctx.get("courses_status", "Not loaded")
+    ps = ctx.get("periods_status", "Not loaded")
+    cs_cls = "ok" if ctx.get("courses_count", 0) > 0 else "none"
+    ps_cls = "ok" if ctx.get("periods_count", 0) > 0 else "none"
+
+    # Render sub-components
+    programs_html = _render_program_grid(ctx)
+    drilldown_html = _render_drilldown(ctx) if ctx.get("drilldown") else ""
+    
+    # Render generation results and history
+    gen_result = ctx.get("generate_result", "")
+    history_html = _render_gen_history(ctx)
+    view_out_style = "display:inline-flex" if gen_result else "display:none"
+    view_output_link = (
+        f'<a class="btn btn-ghost" id="view-output-link" href="{_url("output")}" '
+        f'style="margin-left:10px; font-size:12px; {view_out_style}">View schedules →</a>'
+    )
+
+    return f"""
+<div class="screen active">
+  <div class="card" id="file-loading">
+    <div class="card-title">📂 File Loading</div>
+    
+    <form method="post" action="/set_mode" style="margin-bottom:14px;">
+      <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Load Mode</div>
+      <div class="mode-toggle">
+        <button type="submit" name="mode" value="overwrite" class="mode-btn {ow_cls}">Overwrite</button>
+        <button type="submit" name="mode" value="append" class="mode-btn {ap_cls}">Append</button>
+      </div>
+    </form>
+    
+    <form method="post" action="/upload/courses" enctype="multipart/form-data" class="file-row">
+      <input type="hidden" name="mode" value="{_e(file_mode)}"/>
+      <span class="file-label">Courses File</span>
+      <input type="file" name="file" accept=".txt" required style="max-width:220px; font-size:12px;"/>
+      <button type="submit" class="btn btn-secondary">📂 Upload</button>
+      <span class="file-status {cs_cls}">{_e(cs)}</span>
+    </form>
+    
+    <form method="post" action="/upload/periods" enctype="multipart/form-data" class="file-row">
+      <input type="hidden" name="mode" value="{_e(file_mode)}"/>
+      <span class="file-label">Dates File</span>
+      <input type="file" name="file" accept=".txt" required style="max-width:220px; font-size:12px;"/>
+      <button type="submit" class="btn btn-secondary">📂 Upload</button>
+      <span class="file-status {ps_cls}">{_e(ps)}</span>
+    </form>
+  </div>
+
+  <div class="card" id="program-selection">
+    <div class="card-title">🎓 Study Program Selection</div>
+    <div class="selection-count">Selected: <span id="sel-count">{len(ctx.get('selected_programs', []))}</span> / 5</div>
+    <div class="program-grid">{programs_html}</div>
+  </div>
+  
+  {drilldown_html}
+  
+  <div class="card" id="generate-schedules">
+    <div class="card-title">⚙️ Generate Schedules</div>
+    <p style="color:var(--muted); font-size:13px; margin-bottom:14px;">
+      Runs the backtracking scheduler on Moed Aleph <strong style="color:var(--aleph-color)">✦</strong>
+      and Moed Bet <strong style="color:var(--bet-color)">✦</strong> independently.
+    </p>
+    <form method="post" action="/generate" class="generate-form" style="display:inline;">
+      <button type="submit" class="btn btn-green" id="generateBtn">▶ Generate</button>
+    </form>
+    <span id="gen-result" style="margin-left:12px; font-family:var(--mono); font-size:12px; color:var(--muted);">{_e(gen_result)}</span>
+    {view_output_link}
+    <div id="gen-history-root">{history_html}</div>
+  </div>
+</div>"""
+
+
+def _render_program_grid(ctx: dict) -> str:
+    """
+    Renders the grid of study programs (e.g., Software Engineering, Data Engineering).
+    Provides clickable cards to toggle selection for the scheduler algorithm.
+    """
+    if not ctx.get("courses_count", 0):
+        # Empty state if no courses are uploaded yet
+        return '<div class="empty-state"><div class="icon">📭</div>Load a courses file first</div>'
+        
+    selected = set(ctx.get("selected_programs", []))
+    programs = ctx.get("programs", [])
+    if not programs:
+        return '<div class="empty-state"><div class="icon">📭</div>No programs found in data</div>'
+        
+    parts = []
+    # Loop through each program and create a card
+    for p in programs:
+        pid, name = p["id"], p["name"]
+        sel = " selected" if pid in selected else ""
+        mark = "✓" if pid in selected else ""
+        
+        # Each card contains a form to submit the toggle action
+        parts.append(f"""
+<div class="program-card{sel}" data-prog-id="{_e(pid)}">
+  <form method="post" action="/programs/toggle" class="program-card-form program-toggle-form">
+    <input type="hidden" name="prog_id" value="{_e(pid)}"/>
+    <button type="submit" class="program-card-hit" aria-label="Toggle program {_e(pid)}">
+      <span class="checkmark">{mark}</span>
+      <span class="program-card-text">
+        <span class="pid">{_e(pid)}</span>
+        <span class="pname">{_e(name)}</span>
+      </span>
+    </button>
+  </form>
+  <a class="btn btn-ghost program-view-link" href="{_url('input', drilldown=pid)}">View courses →</a>
+</div>""")
+    return "".join(parts)
+
+
+def _render_drilldown(ctx: dict) -> str:
+    """
+    Renders the detailed table of courses for a specific selected program.
+    Includes filtering options by Year and Semester.
+    """
+    d = ctx["drilldown"]
+    pid, name = d["prog_id"], d["name"]
+    year = d.get("year_filter", "")
+    sem = d.get("sem_filter", "")
+    courses = d.get("courses", [])
+
+    rows = ""
+    if courses:
+        # Generate table rows for each course
+        for c in courses:
+            req = c["requirement"].lower()
+            ev = c["evaluation"].lower()
+            rows += f"""<tr>
+              <td style="font-family:var(--mono); font-size:11px; color:var(--muted);">{_e(c['course_id'])}</td>
+              <td>{_e(c['name'])}</td>
+              <td style="color:var(--muted);">{_e(c['instructor'])}</td>
+              <td style="font-family:var(--mono);">{_e(c['year'])}</td>
+              <td style="font-family:var(--mono); font-size:11px;">{_e(c['semester'])}</td>
+              <td><span class="badge badge-{req}">{_e(c['requirement'])}</span></td>
+              <td><span class="badge badge-{ev}">{_e(c['evaluation'])}</span></td>
+            </tr>"""
+            
+        table = f"""<table class="course-table">
+          <thead><tr>
+            <th>ID</th><th>Course Name</th><th>Instructor</th>
+            <th>Year</th><th>Sem</th><th>Requirement</th><th>Evaluation</th>
+          </tr></thead><tbody>{rows}</tbody></table>"""
+    else:
+        table = '<div class="empty-state">No courses match the filters.</div>'
+
+    # Filter row to apply Year/Semester parameters
+    return f"""
+<div class="card">
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+    <a class="btn btn-ghost" href="{_url('input')}">← Back</a>
+    <div class="card-title" style="margin:0;">{_e(pid)} — {_e(name)}</div>
+  </div>
+  <form method="get" action="/" class="filter-row">
+    <input type="hidden" name="screen" value="input"/>
+    <input type="hidden" name="drilldown" value="{_e(pid)}"/>
+    
+    <select class="filter" name="year">
+      <option value="" {"selected" if not year else ""}>All Years</option>
+      {"".join(f'<option value="{y}" {"selected" if str(y)==str(year) else ""}>Year {y}</option>' for y in range(1,5))}
+    </select>
+    
+    <select class="filter" name="semester">
+      <option value="" {"selected" if not sem else ""}>All Semesters</option>
+      <option value="FALL" {"selected" if sem=="FALL" else ""}>FALL</option>
+      <option value="SPRI" {"selected" if sem=="SPRI" else ""}>SPRING</option>
+      <option value="SUMM" {"selected" if sem=="SUMM" else ""}>SUMMER</option>
+    </select>
+    <button type="submit" class="btn btn-secondary">Apply</button>
+  </form>
+  {table}
+</div>"""
+
+
+def format_generate_result(aleph_count: int, bet_count: int) -> str:
+    """Formats a simple text string indicating how many schedules were successfully generated."""
+    if aleph_count or bet_count:
+        return f"✓ {aleph_count} Aleph · {bet_count} Bet schedules"
+    return ""
+
+
+def render_gen_history_html(history: list) -> str:
+    """Wrapper function to render the history list outside the main flow (used by JS)."""
+    return _render_gen_history({"gen_history": history})
+
+
+def _render_gen_history(ctx: dict) -> str:
+    """
+    Renders a list showing the recent scheduling algorithm runs (history).
+    Allows the user to restore a previous run if they want to roll back their selection.
+    """
+    history = ctx.get("gen_history", [])
+    if not history:
+        return ""
+        
+    items = []
+    # Loop through the history backwards (newest first)
+    for i, h in enumerate(reversed(history)):
+        idx = len(history) - 1 - i
+        is_current = idx == len(history) - 1
+        ts = h.get("ts")
+        time_str = ts.strftime("%H:%M") if ts else ""
+        date_str = ts.strftime("%b %d") if ts else ""
+        prog_str = ", ".join(h.get("programs", [])) or "—"
+        
+        # Indicator if the backtracking algorithm hit a time limit and returned partial results
+        partial = ' <span style="color:var(--yellow)">(partial)</span>' if h.get("timed_out") else ""
+        
+        # Current state has a badge; older states have a 'Restore' button
+        restore = (
+            '<span class="gen-history-badge">current</span>'
+            if is_current
+            else f'<form method="post" action="/history/restore" class="history-restore-form" style="display:inline;">'
+                 f'<input type="hidden" name="index" value="{idx}"/>'
+                 f'<button type="submit" class="btn btn-secondary" style="font-size:11px; padding:4px 10px;">↩ Restore</button></form>'
+        )
+        
+        items.append(f"""
+<div class="gen-history-item {"is-current" if is_current else ""}">
+  <div class="gen-history-slot">#{idx + 1}</div>
+  <div class="gen-history-meta">
+    <div class="gen-history-counts">
+      <span class="a">{h.get('aleph_count', 0)} Aleph</span>
+      <span style="color:var(--muted)"> · </span>
+      <span class="b">{h.get('bet_count', 0)} Bet</span>{partial}
+    </div>
+    <div class="gen-history-detail">Programs: {_e(prog_str)}</div>
+  </div>
+  <div class="gen-history-time">{_e(date_str)} {_e(time_str)}</div>
+  {restore}
+</div>""")
+
+    return f"""
+<div class="gen-history-wrap" style="display:block; margin-top:14px;">
+  <hr class="divider"/>
+  <div class="gen-history-title">📋 Generation history (last 2)</div>
+  <div class="gen-history-list">{"".join(items)}</div>
+</div>"""
+
+
+# ==========================================
+# SCREEN: CALENDAR (Moed Aleph & Bet Setup)
+# ==========================================
+
+def _render_calendar(ctx: dict) -> str:
+    """
+    Renders the 'Calendar' configuration screen.
+    This UI allows users to visually configure which days are available for exams.
+    Displays two parallel panels: one for Moed Aleph and one for Moed Bet.
+    """
+    aleph = ctx.get("aleph_periods", [])
+    bet = ctx.get("bet_periods", [])
+    
+    # Track which semester tab is currently active
+    active_a = min(ctx.get("active_aleph", 0), max(0, len(aleph) - 1))
+    active_b = min(ctx.get("active_bet", 0), max(0, len(bet) - 1))
+    
+    # State flags to know which Moed the Holiday Presets apply to
+    pt_a = ctx.get("preset_target_aleph", True)
+    pt_b = ctx.get("preset_target_bet", True)
+
+    # Render buttons for predefined holidays (Rosh Hashana, Sukkot, etc.)
+    preset_btns = ""
+    for key, preset in HOLIDAY_PRESETS.items():
+        preset_btns += f"""
+<form method="post" action="/calendar/preset" style="display:inline;">
+  <input type="hidden" name="preset" value="{_e(key)}"/>
+  <input type="hidden" name="target_aleph" value="{'1' if pt_a else '0'}"/>
+  <input type="hidden" name="target_bet" value="{'1' if pt_b else '0'}"/>
+  <button type="submit" class="preset-btn">{_e(preset['label'])}</button>
+</form>"""
+
+    aleph_on = " on" if pt_a else ""
+    bet_on = " on" if pt_b else ""
+
+    # Generate the calendar grids
+    aleph_panel = _render_moed_panel("aleph", aleph, active_a, ctx) if aleph else (
+        '<div class="empty-state" style="padding:20px; color:var(--muted); font-size:12px;">No Moed Aleph periods found</div>'
+    )
+    bet_panel = _render_moed_panel("bet", bet, active_b, ctx) if bet else (
+        '<div class="empty-state" style="padding:20px; color:var(--muted); font-size:12px;">No Moed Bet periods found</div>'
+    )
+
+    return f"""
+<div class="screen active">
+  <div style="font-size:13px; color:var(--muted); margin-bottom:12px;">
+    Configure available exam dates for each moed independently. Click any date to toggle it.
+  </div>
+  
+  <div class="preset-bar">
+    <span class="preset-bar-label">🗓 Holiday presets</span>
+    {preset_btns}
+    
+    <div class="preset-target">
+      <span style="font-size:10px; color:var(--muted); font-family:var(--mono); align-self:center;">apply to:</span>
+      <form method="post" action="/calendar/preset_target" style="display:inline;">
+        <input type="hidden" name="moed" value="aleph"/>
+        <input type="hidden" name="target_aleph" value="{'0' if pt_a else '1'}"/>
+        <input type="hidden" name="target_bet" value="{'1' if pt_b else '0'}"/>
+        <button type="submit" class="preset-target-btn aleph-t{aleph_on}">Aleph</button>
+      </form>
+      <form method="post" action="/calendar/preset_target" style="display:inline;">
+        <input type="hidden" name="moed" value="bet"/>
+        <input type="hidden" name="target_aleph" value="{'1' if pt_a else '0'}"/>
+        <input type="hidden" name="target_bet" value="{'0' if pt_b else '1'}"/>
+        <button type="submit" class="preset-target-btn bet-t{bet_on}">Bet</button>
+      </form>
+    </div>
+  </div>
+  
+  <div class="dual-cal-layout">
+    <div class="moed-panel aleph">
+      <div class="moed-header">
+        <span class="moed-badge aleph">MOED ALEPH</span>
+        <span style="font-size:12px; color:var(--muted);">מועד א׳</span>
+      </div>
+      {aleph_panel}
+    </div>
+    <div class="moed-panel bet">
+      <div class="moed-header">
+        <span class="moed-badge bet">MOED BET</span>
+        <span style="font-size:12px; color:var(--muted);">מועד ב׳</span>
+      </div>
+      {bet_panel}
+    </div>
+  </div>
+</div>"""
+
+
+def _render_moed_panel(moed_key: str, periods: list, active: int, ctx: dict) -> str:
+    """
+    Renders the panel for a single Moed (either Aleph or Bet).
+    Contains semester tabs, 'shift' controls (to globally push start/end dates),
+    and the actual visual calendar grid.
+    """
+    period = periods[active]
+    
+    # Create tabs for navigating between different semesters (e.g. Fall, Spring)
+    tabs = ""
+    for i, p in enumerate(periods):
+        cls = f" active-{moed_key}" if i == active else ""
+        cal_params = {
+            "active_aleph": i if moed_key == "aleph" else ctx.get("active_aleph", 0),
+            "active_bet": i if moed_key == "bet" else ctx.get("active_bet", 0),
+        }
+        tabs += f'<a class="period-tab{cls}" href="{_url("calendar", **cal_params)}">{_e(p["semester"])}</a>'
+
+    # Global date shifting controls
+    controls = f"""
+<div class="cal-controls">
+  <form method="post" action="/calendar/shift" class="shift-group" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <input type="hidden" name="semester" value="{_e(period['semester'])}"/>
+    <input type="hidden" name="moed" value="{_e(period['moed'])}"/>
+    <input type="hidden" name="moed_key" value="{_e(moed_key)}"/>
+    <div class="shift-group">
+      <label>Start shift</label>
+      <input class="shift-input" type="number" name="start_shift" value="{period.get('start_shift', 0)}" min="-30" max="30"/>
+    </div>
+    <div class="shift-group">
+      <label>End shift</label>
+      <input class="shift-input" type="number" name="end_shift" value="{period.get('end_shift', 0)}" min="-30" max="30"/>
+    </div>
+    <button type="submit" class="btn btn-secondary">Apply</button>
+    <span style="font-size:11px; color:var(--muted);">{len(period['available'])} days · click to toggle</span>
+  </form>
+</div>"""
+
+    cal = _render_config_calendar(period, moed_key, ctx)
+    legend_color = "rgba(79,142,247,.3)" if moed_key == "aleph" else "rgba(232,131,79,.3)"
+    
+    return f"""
+{tabs}
+{controls}
+<div>{cal}</div>
+<div class="cal-legend">
+  <div class="legend-item"><div class="legend-dot" style="background:{legend_color}"></div> Available</div>
+  <div class="legend-item"><div class="legend-dot" style="background:rgba(224,82,82,.2)"></div> Excluded</div>
+</div>"""
+
+
+def _render_config_calendar(period: dict, moed_key: str, ctx: dict) -> str:
+    """
+    Renders the month-by-month grid for date configuration.
+    Each day is a button that submits a form to toggle its availability state.
+    """
+    # Parse boundaries
+    start = datetime.strptime(period["start"], "%Y-%m-%d")
+    end = datetime.strptime(period["end"], "%Y-%m-%d")
+    
+    # Identify all months spanning the period
+    months = []
+    cur = datetime(start.year, start.month, 1)
+    end_month = datetime(end.year, end.month, 1)
+    while cur <= end_month:
+        months.append(cur)
+        if cur.month == 12:
+            cur = datetime(cur.year + 1, 1, 1)
+        else:
+            cur = datetime(cur.year, cur.month + 1, 1)
+
+    avail = set(period["available"])
+    all_dates = set(period["all_dates"])
+    avail_cls = f"available-{moed_key}"
+    blocks = []
+
+    # Render each month as a block
+    for m in months:
+        year, month = m.year, m.month
+        # Calculate padding needed for the first week (align to Sunday=0)
+        first_day = datetime(year, month, 1).weekday()
+        first_day = (first_day + 1) % 7
+        
+        # Calculate how many days exist in the current month
+        days_in_month = (
+            datetime(year + 1, 1, 1) - datetime(year, month, 1)
+            if month == 12
+            else datetime(year, month + 1, 1) - datetime(year, month, 1)
+        ).days
+        
+        month_str = m.strftime("%B %Y")
+        
+        # Build Day name headers (Sun, Mon, Tue...)
+        cells = "".join(f'<div class="cal-header-cell">{d}</div>' for d in DAY_NAMES)
+        
+        # Fill empty cells before the 1st of the month
+        for _ in range(first_day):
+            cells += '<div class="cal-day empty"></div>'
+            
+        # Loop through all real days in the month
+        for d in range(1, days_in_month + 1):
+            date_str = f"{year}-{month:02d}-{d:02d}"
+            
+            if date_str not in all_dates:
+                # Outside the configured start/end period
+                cells += f'<div class="cal-day out-of-range">{d}</div>'
+            elif date_str in avail:
+                # Available for scheduling: create a toggle button form
+                cells += f"""
+<form method="post" action="/calendar/toggle" style="display:block;">
+  <input type="hidden" name="semester" value="{_e(period['semester'])}"/>
+  <input type="hidden" name="moed" value="{_e(period['moed'])}"/>
+  <input type="hidden" name="date" value="{_e(date_str)}"/>
+  <button type="submit" class="cal-day {avail_cls}" style="width:100%; border:inherit; font:inherit; cursor:pointer;">{d}</button>
+</form>"""
+            else:
+                # Excluded (manual or holiday): create a toggle button form to reactivate
+                cells += f"""
+<form method="post" action="/calendar/toggle" style="display:block;">
+  <input type="hidden" name="semester" value="{_e(period['semester'])}"/>
+  <input type="hidden" name="moed" value="{_e(period['moed'])}"/>
+  <input type="hidden" name="date" value="{_e(date_str)}"/>
+  <button type="submit" class="cal-day excluded" style="width:100%; border:inherit; font:inherit; cursor:pointer;">{d}</button>
+</form>"""
+                
+        blocks.append(
+            f'<div class="month-block"><div class="month-label">{_e(month_str)}</div>'
+            f'<div class="cal-grid">{cells}</div></div>'
+        )
+    return "".join(blocks)
+
+
+# ==========================================
+# SCREEN: OUTPUT (Viewing Generated Results)
+# ==========================================
+
+def _render_output(ctx: dict) -> str:
+    """
+    Renders the 'Output' screen, where the user can browse through
+    the finalized schedules generated by the algorithm.
+    """
+    # Pagination state
+    aleph_page = ctx.get("aleph_page", 0)
+    bet_page = ctx.get("bet_page", 0)
+    aleph_total = ctx.get("aleph_total", 0)
+    bet_total = ctx.get("bet_total", 0)
+
+    # Render toolbars (Prev/Next buttons, Jump to page)
+    aleph_toolbar = _render_output_toolbar("aleph", aleph_page, aleph_total, ctx)
+    bet_toolbar = _render_output_toolbar("bet", bet_page, bet_total, ctx)
+
+    schedule = ctx.get("schedule")
+    if schedule and (schedule.get("aleph_entries") or schedule.get("bet_entries")):
+        sem = schedule.get("semester", "")
+        # Render the final schedule grids
+        out_body = f"""
+<div style="font-family:var(--mono); font-size:11px; color:var(--muted); margin-bottom:14px; letter-spacing:1px;">SEMESTER: {_e(sem)}</div>
+<div class="dual-output-layout">
+  <div class="output-panel">
+    <div class="output-panel-header aleph">
+      <span>● MOED ALEPH</span>
+      <span style="font-size:10px; color:rgba(79,142,247,.6);">{len(schedule.get('aleph_entries', []))} exams</span>
+    </div>
+    {_render_result_calendar(schedule.get('aleph_entries', []), 'aleph')}
+  </div>
+  <div class="output-panel">
+    <div class="output-panel-header bet">
+      <span>● MOED BET</span>
+      <span style="font-size:10px; color:rgba(232,131,79,.6);">{len(schedule.get('bet_entries', []))} exams</span>
+    </div>
+    {_render_result_calendar(schedule.get('bet_entries', []), 'bet')}
+  </div>
+</div>"""
+    else:
+        out_body = '<div class="empty-state"><div class="icon">📊</div>No schedules yet — generate from the Input screen.</div>'
+
+    # Export button logic (generates downloadable ZIP/Excel)
+    export_disabled = "" if (aleph_total or bet_total) else " disabled"
+    export_href = f"/export?aleph_page={aleph_page}&bet_page={bet_page}"
+
+    return f"""
+<div class="screen active">
+  <div class="output-top-bar">
+    {aleph_toolbar}
+    {bet_toolbar}
+  </div>
+  <div class="export-bar">
+    <a class="btn btn-primary" href="{export_href}"{export_disabled}>⬇ Export Both</a>
+  </div>
+  {out_body}
+</div>"""
+
+
+def _render_output_toolbar(moed: str, page: int, total: int, ctx: dict) -> str:
+    """
+    Renders the pagination controls for navigating through multiple schedule variations.
+    Because backtracking can generate hundreds of valid combinations, pagination is essential.
+    """
+    color_var = "aleph-color" if moed == "aleph" else "bet-color"
+    num_cls = "aleph-num" if moed == "aleph" else "bet-num"
+    label = "Moed Aleph" if moed == "aleph" else "Moed Bet"
+
+    # Disable buttons if at boundaries
+    if total == 0:
+        counter = '<span class="x">—</span> <span class="y">/ 0</span>'
+        prev_dis = next_dis = " disabled"
+    else:
+        counter = f'<span class="x {num_cls}">{page + 1}</span> <span class="y">/ {total}</span>'
+        prev_dis = " disabled" if page <= 0 else ""
+        next_dis = " disabled" if page >= total - 1 else ""
+
+    page_btns = _render_page_jump_buttons(moed, page, total, ctx)
+    other = "bet_page" if moed == "aleph" else "aleph_page"
+    other_val = ctx.get("bet_page" if moed == "aleph" else "aleph_page", 0)
+
+    # Build navigation URLs
+    prev_url = _url("output", **{f"{moed}_page": page - 1, other: other_val})
+    next_url = _url("output", **{f"{moed}_page": page + 1, other: other_val})
+
+    return f"""
+<div class="output-toolbar {moed}" style="flex-direction:column; gap:6px; align-items:center;">
+  <div style="font-size:9px; color:var(--{color_var}); font-family:var(--mono); text-transform:uppercase; letter-spacing:1px;">{label}</div>
+  <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap; justify-content:center;">
+    <a class="btn btn-secondary" style="padding:4px 9px; font-size:11px;" href="{prev_url}"{prev_dis}>← Prev</a>
+    <div class="schedule-counter" style="min-width:70px; text-align:center;">{counter}</div>
+    <a class="btn btn-secondary" style="padding:4px 9px; font-size:11px;" href="{next_url}"{next_dis}>Next →</a>
+  </div>
+  <div style="display:flex; gap:3px; flex-wrap:wrap; justify-content:center;">{page_btns}</div>
+  
+  <form method="get" action="/" style="display:flex; gap:4px; align-items:center;">
+    <input type="hidden" name="screen" value="output"/>
+    <input type="hidden" name="{'aleph_page' if moed == 'bet' else 'bet_page'}" value="{other_val}"/>
+    <input type="number" name="{moed}_page" min="1" max="{max(total, 1)}"
+      style="width:62px; padding:3px 6px; border:1px solid var(--border); border-radius:5px;
+             background:var(--surface); color:var(--text); font-size:12px; font-family:var(--mono);"
+      placeholder="#" required/>
+    <button type="submit" class="btn btn-secondary" style="padding:3px 9px; font-size:11px;">Go</button>
+  </form>
+</div>"""
+
+
+def _render_page_jump_buttons(moed: str, current: int, total: int, ctx: dict) -> str:
+    """
+    Renders quick-jump pagination buttons (+10, -50, etc.).
+    Uses PAGE_JUMP_STEPS list to decide intervals based on current page position.
+    """
+    if total <= 1:
+        return ""
+    other_key = "bet_page" if moed == "aleph" else "aleph_page"
+    other_val = ctx.get(other_key, 0)
+    
+    left, right = [], []
+    
+    # Calculate visible left jumps
+    for s in PAGE_JUMP_STEPS:
+        p = current - s
+        if 0 <= p < total and p not in left:
+            left.append(p)
+    left.sort(reverse=True)
+    left_show = list(reversed(left[:5]))
+    
+    # Calculate visible right jumps
+    for s in PAGE_JUMP_STEPS:
+        p = current + s
+        if p < total and p not in right:
+            right.append(p)
+    right_show = right[:5]
+    
+    parts = []
+    # Build HTML for left jumps
+    for p in left_show:
+        parts.append(
+            f'<a class="btn btn-secondary" style="padding:2px 7px; font-size:11px; font-family:var(--mono);" '
+            f'href="{_url("output", **{f"{moed}_page": p, other_key: other_val})}">{p + 1}</a>'
+        )
+        
+    # Current page indicator in the middle
+    parts.append(
+        f'<span style="padding:2px 5px; font-size:11px; font-family:var(--mono); color:var(--muted);">[{current + 1}]</span>'
+    )
+    
+    # Build HTML for right jumps
+    for p in right_show:
+        parts.append(
+            f'<a class="btn btn-secondary" style="padding:2px 7px; font-size:11px; font-family:var(--mono);" '
+            f'href="{_url("output", **{f"{moed}_page": p, other_key: other_val})}">{p + 1}</a>'
+        )
+    return "".join(parts)
+
+
+def _render_result_calendar(entries: list, moed: str) -> str:
+    """
+    Renders the read-only final result calendar displaying mapped exams.
+    Displays course ID, name, and color-codes obligatory vs elective courses.
+    """
+    if not entries:
+        return '<div style="padding:24px; color:var(--muted); font-size:12px; text-align:center;">No exams scheduled</div>'
+
+    # Group the exam entries by their assigned date string
+    by_date: dict[str, list] = {}
+    for e in entries:
+        by_date.setdefault(e["date"], []).append(e)
+
+    # Determine date boundaries
+    dates = sorted(by_date.keys())
+    start = datetime.strptime(dates[0], "%Y-%m-%d")
+    end = datetime.strptime(dates[-1], "%Y-%m-%d")
+    
+    # Identify required months for rendering
+    months = []
+    cur = datetime(start.year, start.month, 1)
+    end_month = datetime(end.year, end.month, 1)
+    while cur <= end_month:
+        months.append(cur)
+        if cur.month == 12:
+            cur = datetime(cur.year + 1, 1, 1)
+        else:
+            cur = datetime(cur.year, cur.month + 1, 1)
+
+    blocks = []
+    # Build the display grid for each month
+    for m in months:
+        year, month = m.year, m.month
+        first_day = (datetime(year, month, 1).weekday() + 1) % 7
+        days_in_month = (
+            datetime(year + 1, 1, 1) - datetime(year, month, 1)
+            if month == 12
+            else datetime(year, month + 1, 1) - datetime(year, month, 1)
+        ).days
+        
+        month_str = m.strftime("%B %Y")
+        cells = "".join(f'<div class="out-cal-header">{d}</div>' for d in DAY_NAMES)
+        
+        for _ in range(first_day):
+            cells += '<div class="out-cal-day empty-day"></div>'
+            
+        # Draw each day cell, embedding exam info if any exist on this date
+        for d in range(1, days_in_month + 1):
+            date_str = f"{year}-{month:02d}-{d:02d}"
+            exams = by_date.get(date_str, [])
+            exam_html = ""
+            for e in exams:
+                # Add CSS classes based on requirement to color-code the blocks
+                req = "obligatory" if e["requirement"] == "Obligatory" else "elective"
+                title = _e(f"{e['course_name']} ({e['instructor']})")
+                exam_html += (
+                    f'<div class="exam-block {req} {moed}" title="{title}">'
+                    f'{_e(e["course_id"])} {_e(e["course_name"])}</div>'
+                )
+            cells += f'<div class="out-cal-day"><div class="out-day-num">{d}</div>{exam_html}</div>'
+            
+        blocks.append(
+            f'<div class="month-block"><div class="month-label">{_e(month_str)}</div>'
+            f'<div class="out-cal-grid">{cells}</div></div>'
+        )
+    return "".join(blocks)
