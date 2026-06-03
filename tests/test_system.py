@@ -69,7 +69,7 @@ class SystemTests(unittest.TestCase):
             relevant_courses = self.filter_courses(courses, selected_programs)
             exam_courses = [c for c in relevant_courses if c.is_exam_required()]
             
-            schedules = self.scheduler.generate(exam_courses, periods)
+            schedules = list(self.scheduler.generate(exam_courses, periods))
             self.writer.write(schedules, output_file, selected_programs)
 
             # 3. Assertions
@@ -123,7 +123,7 @@ class SystemTests(unittest.TestCase):
             self.assertEqual(len(exam_courses), 0, "System should filter out non-matching courses.")
             
             # Running scheduler on empty list should return safely
-            schedules = self.scheduler.generate(exam_courses, periods)
+            schedules = list(self.scheduler.generate(exam_courses, periods))
             self.assertEqual(len(schedules), 0, "System should generate 0 schedules gracefully.")
 
 if __name__ == '__main__':
