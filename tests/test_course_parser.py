@@ -38,6 +38,88 @@ class CourseParser(unittest.TestCase):
         courses = self.parser._split_records(malformed_record)
         course = self.parser._parse_record(courses[0])
         self.assertIsNone(course, "Malformed records should return None.")
+        
+    def test_parse_empty_file_returns_empty_list(self):
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, encoding="utf-8") as f:
+            f.write("")
+            temp_path = f.name
+
+        courses = self.parser.parse(temp_path)
+        os.remove(temp_path)
+
+        self.assertEqual(courses, [])
+
+
+    def test_parse_file_with_only_separators_returns_empty_list(self):
+        content = "$$$$\n$$$$\n$$$$\n"
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, encoding="utf-8") as f:
+            f.write(content)
+            temp_path = f.name
+
+        courses = self.parser.parse(temp_path)
+        os.remove(temp_path)
+
+        self.assertEqual(courses, [])
+
+
+    def test_parse_mixed_valid_and_invalid_records_keeps_valid_only(self):
+        content = (
+            "$$$$\n"
+            "Bad Course\n"
+            "12345\n"
+            "$$$$\n"
+            "Good Course\n"
+            "54321\n"
+            "Dr. Good\n"
+            "83101,1,FALL,Obligatory\n"
+            "Exam\n"
+        )
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, encoding="utf-8") as f:
+            f.write(content)
+            temp_path = f.name
+
+        courses = self.parser.parse(temp_path)
+        os.remove(temp_path)
+
+        self.assertEqual(len(courses), 1)
+        self.assertEqual(courses[0].name, "Good Course")
+        self.assertEqual(courses[0].course_id, "54321")
+
+
+    def test_parse_corrected_file_after_bad_file(self):
+        bad_content = (
+            "$$$$\n"
+            "Physics 1\n"
+            "83102\n"
+        )
+
+        corrected_content = (
+            "$$$$\n"
+            "Physics 1\n"
+            "83102\n"
+            "Prof. Some\n"
+            "83101,1,FALL,Obligatory\n"
+            "Exam\n"
+        )
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, encoding="utf-8") as f:
+            f.write(bad_content)
+            temp_path = f.name
+
+        bad_courses = self.parser.parse(temp_path)
+        self.assertEqual(len(bad_courses), 0)
+
+        with open(temp_path, "w", encoding="utf-8") as f:
+            f.write(corrected_content)
+
+        corrected_courses = self.parser.parse(temp_path)
+        os.remove(temp_path)
+
+        self.assertEqual(len(corrected_courses), 1)
+        self.assertEqual(corrected_courses[0].name, "Physics 1")
+        self.assertEqual(corrected_courses[0].course_id, "83102")
 
 if __name__ == '__main__':
     unittest.main()

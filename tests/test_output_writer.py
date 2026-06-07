@@ -36,6 +36,36 @@ class OutputWriter(unittest.TestCase):
         self.assertIn("Selected Programs : 83101", content)
         self.assertIn("Schedule #1", content)
         self.assertIn("Math 1", content)
+        
+    def test_write_empty_schedule_list(self):
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, encoding="utf-8") as f:
+            temp_path = f.name
+
+        self.writer.write([], temp_path, ["83101"])
+
+        with open(temp_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        os.remove(temp_path)
+
+        self.assertIn("SCHEDULIX", content)
+        self.assertIn("Selected Programs", content)
+
+
+    def test_write_schedule_with_multiple_selected_programs(self):
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, encoding="utf-8") as f:
+            temp_path = f.name
+
+        self.writer.write([self.schedule], temp_path, ["83101", "83102", "83104"])
+
+        with open(temp_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        os.remove(temp_path)
+
+        self.assertIn("83101", content)
+        self.assertIn("83102", content)
+        self.assertIn("83104", content)
 
 if __name__ == '__main__':
     unittest.main()

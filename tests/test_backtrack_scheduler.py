@@ -32,5 +32,36 @@ class BacktrackScheduler(unittest.TestCase):
         schedules = list(self.scheduler.generate([project_course], [self.period]))
         self.assertEqual(len(schedules), 0, "Should return empty list for non-exam courses.")
 
+    def test_not_enough_dates_for_conflicting_obligatory_courses(self):
+        p1 = Program("83101", 1, "FALL", "Obligatory")
+        c1 = Course("Math 1", "11111", "Dr. A", [p1], "Exam")
+        c2 = Course("Physics 1", "22222", "Dr. B", [p1], "Exam")
+
+        one_day_period = ExamPeriod("FALL", "Aleph", "29-01-2026", "29-01-2026")
+
+        schedules = list(self.scheduler.generate([c1, c2], [one_day_period]))
+
+        self.assertEqual(len(schedules), 0)
+
+
+    def test_scheduler_ignores_non_exam_courses(self):
+        p1 = Program("83101", 1, "FALL", "Obligatory")
+        project_course = Course("Project", "33333", "Dr. C", [p1], "Project")
+
+        period = ExamPeriod("FALL", "Aleph", "29-01-2026", "31-01-2026")
+
+        schedules = list(self.scheduler.generate([project_course], [period]))
+
+        self.assertEqual(len(schedules), 0)
+
+
+    def test_scheduler_handles_empty_periods(self):
+        p1 = Program("83101", 1, "FALL", "Obligatory")
+        c1 = Course("Math 1", "11111", "Dr. A", [p1], "Exam")
+
+        schedules = list(self.scheduler.generate([c1], []))
+
+        self.assertEqual(len(schedules), 0)
+    
 if __name__ == '__main__':
     unittest.main()
