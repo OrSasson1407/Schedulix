@@ -9,7 +9,7 @@ file loading, browsing/exporting interface, and usability improvements."""
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from ui.views import (
+from src.ui.views import (
     render_page,
     format_generate_result,
     render_gen_history_html,
