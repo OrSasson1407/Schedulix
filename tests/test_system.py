@@ -125,6 +125,63 @@ class SystemTests(unittest.TestCase):
             # Running scheduler on empty list should return safely
             schedules = list(self.scheduler.generate(exam_courses, periods))
             self.assertEqual(len(schedules), 0, "System should generate 0 schedules gracefully.")
+            
+    def test_system_corrected_course_file_after_invalid_file(self):
+        bad_course_data = (
+            "$$$$\n"
+            "Broken Course\n"
+            "12345\n"
+        )
+
+        corrected_course_data = (
+            "$$$$\n"
+            "Corrected Course\n"
+            "12345\n"
+            "Dr. Correct\n"
+            "83101,1,FALL,Obligatory\n"
+            "Exam\n"
+        )
+
+        period_data = (
+            "$$$$\n"
+            "FALL, Aleph\n"
+            "29-01-2026, 31-01-2026\n"
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            course_file = os.path.join(temp_dir, "CourseDB.txt")
+            period_file = os.path.join(temp_dir, "ExamDates.txt")
+            output_file = os.path.join(temp_dir, "schedules.txt")
+
+            with open(course_file, "w", encoding="utf-8") as f:
+                f.write(bad_course_data)
+
+            with open(period_file, "w", encoding="utf-8") as f:
+                f.write(period_data)
+
+            bad_courses = self.course_parser.parse(course_file)
+            self.assertEqual(len(bad_courses), 0)
+
+            with open(course_file, "w", encoding="utf-8") as f:
+                f.write(corrected_course_data)
+
+            courses = self.course_parser.parse(course_file)
+            periods = self.period_parser.parse(period_file)
+
+            selected_programs = ["83101"]
+            relevant_courses = self.filter_courses(courses, selected_programs)
+            exam_courses = [c for c in relevant_courses if c.is_exam_required()]
+
+            schedules = list(self.scheduler.generate(exam_courses, periods))
+            self.writer.write(schedules, output_file, selected_programs)
+
+            self.assertTrue(os.path.exists(output_file))
+            self.assertTrue(len(schedules) > 0)
+
+            with open(output_file, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            self.assertIn("Corrected Course", content)
 
 if __name__ == '__main__':
     unittest.main()
