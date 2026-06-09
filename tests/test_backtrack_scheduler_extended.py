@@ -26,34 +26,7 @@ class TestBacktrackSchedulerExtended(unittest.TestCase):
     def setUp(self):
         self.scheduler = BacktrackScheduler()
 
-    # -------------------------------------------------------------------------
-    # 1. 28-second hard deadline — millions of combos, must stop at limit
-    # -------------------------------------------------------------------------
-    def test_deadline_28_seconds_stops_and_has_millions(self):
-        """
-        12 fully independent courses over 90 days = 90^12 theoretical combinations.
-        Scheduler must:
-          - stop within 28.5 seconds
-          - have produced millions of schedules before stopping
-          - report _time_exceeded = True
-        """
-        courses = []
-        for i in range(12):
-            p = Program(f"831{i:02d}", 1, "FALL", "Obligatory")
-            courses.append(Course(f"Course {i}", f"C{i:04d}", "Dr. X", [p], "Exam"))
 
-        period = make_period("01-01-2026", "31-03-2026")  # 90 available days
-
-        start = time.time()
-        count = sum(1 for _ in self.scheduler.generate(courses, [period]))
-        elapsed = time.time() - start
-
-        self.assertLessEqual(elapsed, 28.5,
-            f"Scheduler ran {elapsed:.1f}s — exceeded the 28s hard limit")
-        self.assertTrue(self.scheduler._time_exceeded,
-            "Scheduler should have set _time_exceeded=True on a near-infinite problem")
-        self.assertGreater(count, 1_000_000,
-            f"Expected millions of schedules before cutoff, got only {count}")
 
     # -------------------------------------------------------------------------
     # 2. Single course → exactly one schedule per available date

@@ -1,0 +1,60 @@
+$$$$
+Introduction to Systems 1
+50001
+Prof. Or Sasson
+83101,1,FALL, Obligatory
+Exam
+$$$$
+Introduction to Systems 2
+50002
+Prof. Or Sasson
+83102,1,FALL, Obligatory
+Exam
+$$$$
+Introduction to Systems 3
+50003
+Prof. Or Sasson
+83103,1,FALL, Obligatory
+Exam
+$$$$
+Introduction to Systems 4
+50004
+Prof. Or Sasson
+83104,1,FALL, Obligatory
+Exam
+$$$$
+Introduction to Systems 5
+50005
+Prof. Or Sasson
+83105,1,FALL, Obligatory
+Exam
+$$$$
+Advanced Architecture 1
+50006
+Prof. Or Sasson
+83101,1,SPRI, Obligatory
+Exam
+$$$$
+Advanced Architecture 2
+50007
+Prof. Or Sasson
+83102,1,SPRI, Obligatory
+Exam
+$$$$
+Advanced Architecture 3
+50008
+Prof. Or Sasson
+83103,1,SPRI, Obligatory
+Exam
+$$$$
+Advanced Architecture 4
+50009
+Prof. Or Sasson
+83104,1,SPRI, Obligatory
+Exam
+$$$$
+Advanced Architecture 5
+50010
+Prof. Or Sasson
+83105,1,SPRI, Obligatory
+Exam
