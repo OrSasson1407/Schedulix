@@ -1,5 +1,5 @@
 """
-app.py — Schedulix V3 (Python + CSS only)
+app.py — Schedulix V2 (Python + CSS only)
 
 All UI is built in Python (src/ui/views.py) and styled with static/style.css.
 No separate HTML/JS frontend and no REST API for the browser — only form POSTs and links.
@@ -777,7 +777,7 @@ def export_schedule():
 
     lines = [
         "=" * 70,
-        "  SCHEDULIX — Exam Schedule Generator  |  Version 3.1",
+        "  SCHEDULIX — Exam Schedule Generator  |  Version 2.0",
         "=" * 70,
         f"  Selected Programs : {', '.join(str(p) for p in state['selected_programs'])}",
         f"  Moed Aleph        : Schedule {aleph_page + 1} of {aleph_total}",
