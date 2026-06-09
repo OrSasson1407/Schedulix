@@ -308,13 +308,13 @@ def _courses_conflict(course_a, course_b) -> bool:
     a_map = {}
     for prog in course_a.programs:
         key = (prog.program_id, prog.year)
-        if key not in a_map or prog.requirement == Obligatory:
+        if key not in a_map or prog.requirement == "Obligatory":
             a_map[key] = prog.requirement
 
     for prog in course_b.programs:
         key = (prog.program_id, prog.year)
         if key in a_map:
-            if a_map[key] == Obligatory or prog.requirement == Obligatory:
+            if a_map[key] == "Obligatory" or prog.requirement == "Obligatory":
                 return True
     return False
 
