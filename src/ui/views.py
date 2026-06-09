@@ -193,7 +193,7 @@ def render_page(ctx: dict) -> str:
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Schedulix v3.0</title>
+<title>Schedulix v2.0</title>
 <link rel="icon" href="{LOGO_URL}" type="image/jpeg"/>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="/static/style.css"/>
@@ -205,7 +205,7 @@ def render_page(ctx: dict) -> str:
       <img class="logo-img" src="{LOGO_URL}" alt="Schedulix logo" width="48" height="48"/>
       <div class="logo-text">
         <span class="logo-name">Schedulix</span>
-        <span class="logo-version">Version 3.0</span>
+        <span class="logo-version">Version 2.0</span>
       </div>
     </div>
     {nav}

@@ -180,7 +180,6 @@ table.course-table tr:hover td { background: var(--surface2); }
 .export-bar { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 16px; }
 
 .dual-output-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.output-panel { }
 .output-panel-header { font-family: var(--mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 10px; padding: 8px 14px; border-radius: 6px; display: flex; align-items: center; gap: 8px; }
 .output-panel-header.aleph { background: rgba(79,142,247,.1); color: var(--aleph-color); border: 1px solid rgba(79,142,247,.2); }
 .output-panel-header.bet   { background: rgba(232,131,79,.1);  color: var(--bet-color);   border: 1px solid rgba(232,131,79,.2); }
