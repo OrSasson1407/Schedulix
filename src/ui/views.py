@@ -910,7 +910,7 @@ def _render_output(ctx: dict) -> str:
 
     # Export button logic (generates downloadable ZIP/Excel)
     export_disabled = "" if (aleph_total or bet_total) else " disabled"
-    export_href = f"/export?aleph_page={aleph_page}&bet_page={bet_page}"
+    export_href = f"/export?aleph_page={aleph_page + 1}&bet_page={bet_page + 1}"
 
     return f"""
 <div class="screen active">
@@ -948,8 +948,9 @@ def _render_output_toolbar(moed: str, page: int, total: int, ctx: dict) -> str:
     other_val = ctx.get("bet_page" if moed == "aleph" else "aleph_page", 0)
 
     # Build navigation URLs
-    prev_url = _url("output", **{f"{moed}_page": page - 1, other: other_val})
-    next_url = _url("output", **{f"{moed}_page": page + 1, other: other_val})
+    other_val_1b = other_val + 1
+    prev_url = _url("output", **{f"{moed}_page": page, other: other_val_1b})
+    next_url = _url("output", **{f"{moed}_page": page + 2, other: other_val_1b})
 
     return f"""
 <div class="output-toolbar {moed}" style="flex-direction:column; gap:6px; align-items:center;">
@@ -963,7 +964,7 @@ def _render_output_toolbar(moed: str, page: int, total: int, ctx: dict) -> str:
   
   <form method="get" action="/" style="display:flex; gap:4px; align-items:center;">
     <input type="hidden" name="screen" value="output"/>
-    <input type="hidden" name="{'aleph_page' if moed == 'bet' else 'bet_page'}" value="{other_val}"/>
+    <input type="hidden" name="{'aleph_page' if moed == 'bet' else 'bet_page'}" value="{other_val_1b}"/>
     <input type="number" name="{moed}_page" min="1" max="{max(total, 1)}"
       style="width:62px; padding:3px 6px; border:1px solid var(--border); border-radius:5px;
              background:var(--surface); color:var(--text); font-size:12px; font-family:var(--mono);"
@@ -1005,7 +1006,7 @@ def _render_page_jump_buttons(moed: str, current: int, total: int, ctx: dict) ->
     for p in left_show:
         parts.append(
             f'<a class="btn btn-secondary" style="padding:2px 7px; font-size:11px; font-family:var(--mono);" '
-            f'href="{_url("output", **{f"{moed}_page": p, other_key: other_val})}">{p + 1}</a>'
+            f'href="{_url("output", **{f"{moed}_page": p + 1, other_key: other_val + 1})}">{p + 1}</a>'
         )
         
     # Current page indicator in the middle
@@ -1017,7 +1018,7 @@ def _render_page_jump_buttons(moed: str, current: int, total: int, ctx: dict) ->
     for p in right_show:
         parts.append(
             f'<a class="btn btn-secondary" style="padding:2px 7px; font-size:11px; font-family:var(--mono);" '
-            f'href="{_url("output", **{f"{moed}_page": p, other_key: other_val})}">{p + 1}</a>'
+            f'href="{_url("output", **{f"{moed}_page": p + 1, other_key: other_val + 1})}">{p + 1}</a>'
         )
     return "".join(parts)
 
