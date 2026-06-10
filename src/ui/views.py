@@ -1,4 +1,4 @@
-﻿"""
+"""
 Server-side HTML rendering for Schedulix (Python + CSS only).
 This module is responsible for generating the entire HTML structure of the application.
 Although the UI primarily relies on traditional form submissions and links handled by app.py,
@@ -308,6 +308,8 @@ def render_page(ctx: dict) -> str:
           }}
           // Re-bind click events for newly injected HTML
           document.querySelectorAll("form.history-restore-form").forEach(bindHistoryRestore);
+          // Auto-navigate to output page when generation is done
+          window.location.href = "/?screen=output";
         }})
         .catch(function () {{
           showToast("Generate failed", "err");
@@ -382,6 +384,51 @@ def render_page(ctx: dict) -> str:
   var el = document.querySelector(id);
   if (el) el.scrollIntoView({{ block: "start", behavior: "instant" }});
 }})();
+  // Course detail modal
+  (function() {{
+    var overlay = document.createElement('div');
+    overlay.id = 'course-modal-overlay';
+    overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;';
+    overlay.innerHTML = [
+      '<div id="course-modal" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px 32px;min-width:300px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.4);position:relative;">',
+      '<button onclick="hideCourseModal()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;">\u2715</button>',
+      '<div id="cm-badge" style="font-size:10px;font-family:var(--mono);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;"></div>',
+      '<div id="cm-name" style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:4px;"></div>',
+      '<div id="cm-id" style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:18px;"></div>',
+      '<table style="width:100%;border-collapse:collapse;font-size:13px;">',
+      '<tr><td style="color:var(--muted);padding:5px 0;width:110px;">Instructor</td><td id="cm-instructor" style="color:var(--text);font-weight:500;"></td></tr>',
+      '<tr><td style="color:var(--muted);padding:5px 0;">Requirement</td><td id="cm-req" style="font-weight:500;"></td></tr>',
+      '<tr><td style="color:var(--muted);padding:5px 0;">Programs</td><td id="cm-programs" style="color:var(--text);"></td></tr>',
+      '<tr><td style="color:var(--muted);padding:5px 0;">Exam Date</td><td id="cm-date" style="color:var(--text);font-family:var(--mono);"></td></tr>',
+      '<tr><td style="color:var(--muted);padding:5px 0;">Moed</td><td id="cm-moed" style="font-weight:500;"></td></tr>',
+      '</table></div>'
+    ].join('');
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) {{ if (e.target === overlay) hideCourseModal(); }});
+  }})();
+
+  function showCourseModal(el) {{
+    var d = el.dataset;
+    var isAleph = d.moed === 'aleph';
+    var reqColor = d.requirement === 'Obligatory' ? 'var(--aleph-color)' : 'var(--bet-color)';
+    var moodColor = isAleph ? 'var(--aleph-color)' : 'var(--bet-color)';
+    document.getElementById('cm-badge').style.color = moodColor;
+    document.getElementById('cm-badge').textContent = isAleph ? '\u2666 MOED ALEPH' : '\u2666 MOED BET';
+    document.getElementById('cm-name').textContent = d.courseName;
+    document.getElementById('cm-id').textContent = d.courseId;
+    document.getElementById('cm-instructor').textContent = d.instructor;
+    document.getElementById('cm-req').textContent = d.requirement;
+    document.getElementById('cm-req').style.color = reqColor;
+    document.getElementById('cm-programs').textContent = d.programs || '\u2014';
+    document.getElementById('cm-date').textContent = d.date;
+    document.getElementById('cm-moed').textContent = isAleph ? 'Aleph' : 'Bet';
+    document.getElementById('cm-moed').style.color = moodColor;
+    document.getElementById('course-modal-overlay').style.display = 'flex';
+  }}
+
+  function hideCourseModal() {{
+    document.getElementById('course-modal-overlay').style.display = 'none';
+  }}
 </script>
 </body>
 </html>"""
@@ -1094,8 +1141,18 @@ def _render_result_calendar(entries: list, moed: str) -> str:
                 # Add CSS classes based on requirement to color-code the blocks
                 req = "obligatory" if e["requirement"] == "Obligatory" else "elective"
                 title = _e(f"{e['course_name']} ({e['instructor']})")
+                progs_str = _e(", ".join(e.get("programs", [])))
                 exam_html += (
-                    f'<div class="exam-block {req} {moed}" title="{title}">'
+                    f'<div class="exam-block {req} {moed}" title="{title}" '
+                    f'style="cursor:pointer;" '
+                    f'data-course-id="{_e(e["course_id"])}" '
+                    f'data-course-name="{_e(e["course_name"])}" '
+                    f'data-instructor="{_e(e["instructor"])}" '
+                    f'data-requirement="{_e(req)}" '
+                    f'data-programs="{progs_str}" '
+                    f'data-date="{_e(e["date"])}" '
+                    f'data-moed="{_e(moed)}" '
+                    f'onclick="showCourseModal(this)">'
                     f'{_e(e["course_id"])} {_e(e["course_name"])}</div>'
                 )
             cells += f'<div class="out-cal-day"><div class="out-day-num">{d}</div>{exam_html}</div>'
