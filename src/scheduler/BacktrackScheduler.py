@@ -519,4 +519,4 @@ class BacktrackScheduler(Scheduler):
                         period.moed,
                         available_dates[d_idx],
                     )
-                yield schedule0
+                yield schedule
