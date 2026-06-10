@@ -1,60 +1,60 @@
 $$$$
-Introduction to Systems 1
-50001
+Fall Bench 1
+10001
 Prof. Or Sasson
-83101,1,FALL, Obligatory
+83101,1,FALL,Obligatory
 Exam
 $$$$
-Introduction to Systems 2
-50002
+Fall Bench 2
+10002
 Prof. Or Sasson
-83102,1,FALL, Obligatory
+83102,1,FALL,Obligatory
 Exam
 $$$$
-Introduction to Systems 3
-50003
+Fall Bench 3
+10003
 Prof. Or Sasson
-83103,1,FALL, Obligatory
+83103,1,FALL,Obligatory
 Exam
 $$$$
-Introduction to Systems 4
-50004
+Fall Bench 4
+10004
 Prof. Or Sasson
-83104,1,FALL, Obligatory
+83104,1,FALL,Obligatory
 Exam
 $$$$
-Introduction to Systems 5
-50005
+Fall Bench 5
+10005
 Prof. Or Sasson
-83105,1,FALL, Obligatory
+83105,1,FALL,Obligatory
 Exam
 $$$$
-Advanced Architecture 1
-50006
+Spring Bench 1
+20001
 Prof. Or Sasson
-83101,1,SPRI, Obligatory
+83101,1,SPRI,Obligatory
 Exam
 $$$$
-Advanced Architecture 2
-50007
+Spring Bench 2
+20002
 Prof. Or Sasson
-83102,1,SPRI, Obligatory
+83102,1,SPRI,Obligatory
 Exam
 $$$$
-Advanced Architecture 3
-50008
+Spring Bench 3
+20003
 Prof. Or Sasson
-83103,1,SPRI, Obligatory
+83103,1,SPRI,Obligatory
 Exam
 $$$$
-Advanced Architecture 4
-50009
+Spring Bench 4
+20004
 Prof. Or Sasson
-83104,1,SPRI, Obligatory
+83104,1,SPRI,Obligatory
 Exam
 $$$$
-Advanced Architecture 5
-50010
+Spring Bench 5
+20005
 Prof. Or Sasson
-83105,1,SPRI, Obligatory
+83105,1,SPRI,Obligatory
 Exam

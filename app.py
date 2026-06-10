@@ -55,6 +55,7 @@ state = {
     "preset_target_bet": True,
     "gen_history": [],
     "flash": None,
+    "active_semester": "",
 }
 
 CACHE_PATH = os.path.join(PROJECT_ROOT, "data", ".cache.pkl")
@@ -336,20 +337,37 @@ def build_context(screen=None):
             ),
         }
 
-    if screen == "output" and (aleph_total or bet_total):
+    # Semester switching
+    semesters = all_semesters()
+    active_sem = request.args.get("semester_view", state.get("active_semester", ""))
+    if active_sem and active_sem in semesters:
+        state["active_semester"] = active_sem
+    elif semesters and state.get("active_semester", "") not in semesters:
+        state["active_semester"] = semesters[0]
+    active_sem = state.get("active_semester", "")
+
+    sem_aleph, sem_bet = schedules_for_semester(active_sem) if active_sem else (state["aleph_schedules"], state["bet_schedules"])
+    sem_aleph_total = len(sem_aleph)
+    sem_bet_total   = len(sem_bet)
+    sem_aleph_page  = _page_index(request.args.get("aleph_page"), sem_aleph_total)
+    sem_bet_page    = _page_index(request.args.get("bet_page"),   sem_bet_total)
+
+    ctx["semesters"]        = semesters
+    ctx["active_semester"]  = active_sem
+    ctx["aleph_total"]      = sem_aleph_total
+    ctx["bet_total"]        = sem_bet_total
+    ctx["aleph_page"]       = sem_aleph_page
+    ctx["bet_page"]         = sem_bet_page
+
+    if screen == "output" and (sem_aleph_total or sem_bet_total):
         aleph_entries = (
-            schedule_to_entries(state["aleph_schedules"][aleph_page]) if aleph_total else []
+            schedule_to_entries(sem_aleph[sem_aleph_page]) if sem_aleph_total else []
         )
         bet_entries = (
-            schedule_to_entries(state["bet_schedules"][bet_page]) if bet_total else []
+            schedule_to_entries(sem_bet[sem_bet_page]) if sem_bet_total else []
         )
-        sem = ""
-        if aleph_entries:
-            sem = aleph_entries[0]["semester"]
-        elif bet_entries:
-            sem = bet_entries[0]["semester"]
         ctx["schedule"] = {
-            "semester": sem,
+            "semester": active_sem,
             "aleph_entries": aleph_entries,
             "bet_entries": bet_entries,
         }
@@ -423,6 +441,13 @@ def run_generation():
             if s.assignments:
                 state["bet_schedules"].append(s)
 
+    def _infer_semesters():
+        sems = set()
+        for s in state["aleph_schedules"] + state["bet_schedules"]:
+            for (course, moed), exam_date in s.assignments.items():
+                sems.add(exam_date.semester)
+        return sorted(sems)
+
     hard_timeout = BacktrackScheduler.TIME_LIMIT_SECONDS + 1
     with _generation_lock:
         t_a = threading.Thread(target=_run_aleph, daemon=True)
@@ -434,7 +459,30 @@ def run_generation():
             time.sleep(0.1)
         timed_out = t_a.is_alive() or t_b.is_alive()
 
+    sems = _infer_semesters()
+    if sems and state["active_semester"] not in sems:
+        state["active_semester"] = sems[0]
     return len(state["aleph_schedules"]), len(state["bet_schedules"]), timed_out
+
+
+def schedules_for_semester(sem):
+    """Return aleph/bet schedules that belong to a given semester."""
+    def _matches(sched, sem):
+        for (course, moed), exam_date in sched.assignments.items():
+            if exam_date.semester == sem:
+                return True
+        return False
+    aleph = [s for s in state["aleph_schedules"] if _matches(s, sem)]
+    bet   = [s for s in state["bet_schedules"]   if _matches(s, sem)]
+    return aleph, bet
+
+
+def all_semesters():
+    sems = set()
+    for s in state["aleph_schedules"] + state["bet_schedules"]:
+        for (course, moed), exam_date in s.assignments.items():
+            sems.add(exam_date.semester)
+    return sorted(sems)
 
 
 def apply_holiday_preset(preset_key, target_aleph, target_bet):
@@ -759,21 +807,15 @@ def calendar_preset():
 
 @app.route("/export")
 def export_schedule():
-    aleph_total = len(state["aleph_schedules"])
-    bet_total = len(state["bet_schedules"])
+    sem = request.args.get("semester_view", state.get("active_semester", ""))
+    exp_aleph, exp_bet = schedules_for_semester(sem) if sem else (state["aleph_schedules"], state["bet_schedules"])
+    aleph_total = len(exp_aleph)
+    bet_total   = len(exp_bet)
     aleph_page = _page_index(request.args.get("aleph_page"), aleph_total)
-    bet_page = _page_index(request.args.get("bet_page"), bet_total)
+    bet_page   = _page_index(request.args.get("bet_page"),   bet_total)
 
-    aleph_sched = (
-        state["aleph_schedules"][aleph_page]
-        if aleph_total and aleph_page < aleph_total
-        else None
-    )
-    bet_sched = (
-        state["bet_schedules"][bet_page]
-        if bet_total and bet_page < bet_total
-        else None
-    )
+    aleph_sched = exp_aleph[aleph_page] if aleph_total and aleph_page < aleph_total else None
+    bet_sched   = exp_bet[bet_page]     if bet_total   and bet_page   < bet_total   else None
 
     lines = [
         "=" * 70,
@@ -805,7 +847,8 @@ def export_schedule():
             lines.append("    (no schedule)")
         lines.append("")
 
-    fname = f"schedule_A{aleph_page + 1}_B{bet_page + 1}.txt"
+    sem_tag = sem.replace(" ", "_") if sem else "all"
+    fname = f"schedule_{sem_tag}_A{aleph_page + 1}_B{bet_page + 1}.txt"
     return Response(
         "\n".join(lines),
         mimetype="text/plain",
