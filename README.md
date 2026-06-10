@@ -181,7 +181,7 @@ Schedulix
 # Technologies
 
 - Python
-- C++
+- Css
 - Object-Oriented Design
 - CSP Backtracking Algorithm
 - Git
