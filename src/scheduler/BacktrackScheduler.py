@@ -1,352 +1,59 @@
 """
 BacktrackScheduler.py
-ULTRA-FAST STREAMING CSP Scheduler — Advanced Algorithms Edition
+ULTRA-FAST STREAMING CSP Scheduler — Redesigned Edition
 
-MAJOR CS OPTIMIZATIONS APPLIED:
-  1. STATE MEMENTO (TRAIL STACK): Replaced heavy 'pruned' loops with C-speed shallow copies (domains[:]).
-  2. O(1) MRV BITMASKING: unassigned_mask uses bit-shifting to skip allocated nodes instantly.
-  3. SYMMETRY BREAKING: Pre-calculates Equivalent Days (day_signatures) to skip redundant dead-ends.
-  4. PURE IPC QUEUE & MONOTONIC CLOCK: For high-throughput stream yielding.
+ALGORITHM IMPROVEMENTS OVER V1:
+  1. NO SUBPROCESS OVERHEAD: Pure single-process generator pipeline.
+  2. MAC (MAINTAINING ARC CONSISTENCY): AC3 restricted to affected arcs.
+  3. TRAIL STACK (O(CHANGED) UNDO): Undo is O(changed) via an explicit trail.
+  4. CONFLICT-DIRECTED BACKJUMPING (CBJ): Skips intermediate valid levels on wipeouts.
+  5. LAZY COMPONENT CHAINING: Generators composed lazily with caching for small sets.
+  6. SYMMETRY BREAKING: Interchangeable dates are grouped to prune symmetric branches.
+  7. LCV (LEAST-CONSTRAINING VALUE): Bitmask popcount value ordering.
 """
 
 import time
-import itertools
 import collections
-import random
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
+import heapq
+import itertools
 from .Scheduler import Scheduler
 from ..models.Schedule import Schedule
+
 
 # ---------------------------------------------------------------------------
 # Tuneable constants
 # ---------------------------------------------------------------------------
-NODE_CHECK_INTERVAL       = 10_000
-MAX_NOGOODS               = 200_000
-USE_AC3                   = True
-USE_LCV                   = True
-LCV_DOMAIN_LIMIT          = 20
-BATCH_SIZE                = 10_000    
-MAX_CARTESIAN_SOLUTIONS   = 50_000    
-GIANT_COMPONENT_THRESHOLD = 25        
-
-# O(1) Lookup table for lightning-fast bit decoding
-BIT_TO_IDX = { (1 << i): i for i in range(100) }
+NODE_CHECK_INTERVAL = 5_000          # How often to check wall-clock time limit
+USE_MAC             = True           # Maintaining Arc Consistency after each assignment
+USE_LCV             = True           # Least-Constraining Value ordering
+LCV_DOMAIN_LIMIT    = 30             # Only sort by LCV if domain size <= this
+USE_CBJ             = True           # Conflict-Directed Backjumping
+USE_SYMMETRY        = True           # Skip symmetric (interchangeable) domain values
+MAX_CACHE_SOLS      = 1000           # Materialize components with <= this many sols
 
 
-def _get_connected_components(n: int, conflict_graph: list) -> list:
-    visited = set()
-    components = []
-
-    for i in range(n):
-        if i not in visited:
-            component = []
-            queue = collections.deque([i])
-            visited.add(i)
-
-            while queue:
-                curr = queue.popleft() 
-                component.append(curr)
-                for neighbor in conflict_graph[curr]:
-                    if neighbor not in visited:
-                        visited.add(neighbor)
-                        queue.append(neighbor)
-
-            components.append(component)
-
-    return components
+# ---------------------------------------------------------------------------
+# Bit utility: iterate set bits in an integer bitmask
+# ---------------------------------------------------------------------------
+def _bits(mask: int):
+    """Yield the index of each set bit in mask, lowest first."""
+    while mask:
+        lsb  = mask & (-mask)
+        yield lsb.bit_length() - 1
+        mask &= mask - 1
 
 
-def _solve_via_min_conflicts(n_comp, comp_graph, comp_domains, time_limit, start_time):
-    valid_values = []
-    for d in comp_domains:
-        vals, tmp = [], d
-        while tmp:
-            bit = tmp & (-tmp)
-            vals.append(BIT_TO_IDX[bit])
-            tmp &= tmp - 1
-        valid_values.append(vals)
-
-    def count_conflicts(assignment, var, val):
-        count = 0
-        for neighbor in comp_graph[var]:
-            if assignment[neighbor] == val:
-                count += 1
-        return count
-
-    while time.monotonic() - start_time < time_limit:
-        assignment = [random.choice(v) for v in valid_values]
-        
-        for _ in range(5_000): 
-            conflicted_vars = [i for i in range(n_comp) if count_conflicts(assignment, i, assignment[i]) > 0]
-            if not conflicted_vars:
-                return [assignment] 
-            
-            var = random.choice(conflicted_vars)
-            
-            best_val, min_c = assignment[var], float('inf')
-            for val in valid_values[var]:
-                c = count_conflicts(assignment, var, val)
-                if c == 0:
-                    best_val = val
-                    break
-                if c < min_c:
-                    min_c = c
-                    best_val = val
-            assignment[var] = best_val
-
-    return [] 
+def _bit_count(mask: int) -> int:
+    # PERF: native Python 3.10+ C implementation, avoids string allocations
+    return mask.bit_count()
 
 
-def _solve_single_component(n_comp, comp_graph, comp_degrees, comp_domains, time_limit, start_time, time_exceeded):
-    node_counter   = [0]
-    nogoods        = {}
-    nogood_counter = [0]
-
-    # CS OPTIMIZATION 3: Symmetry Breaking
-    # Group days by their initial domain footprint (which courses allow them).
-    day_footprints = collections.defaultdict(list)
-    all_bits = set()
-    for d in comp_domains:
-        tmp = d
-        while tmp:
-            b = tmp & (-tmp)
-            all_bits.add(b)
-            tmp &= tmp - 1
-            
-    for bit in all_bits:
-        signature = sum((1 << i) for i in range(n_comp) if (comp_domains[i] & bit))
-        day_footprints[signature].append(bit)
-        
-    symmetric_group = {}
-    for sig, bits in day_footprints.items():
-        if len(bits) > 1:
-            for b in bits: symmetric_group[b] = bits
-
-    def add_nogood(key):
-        if key in nogoods: return
-        if len(nogoods) >= MAX_NOGOODS:
-            oldest = next(iter(nogoods))
-            del nogoods[oldest]
-        nogoods[key] = nogood_counter[0]
-        nogood_counter[0] += 1
-
-    def ac3(domains):
-        queue = collections.deque()
-        for i in range(n_comp):
-            for j in comp_graph[i]:
-                queue.append((i, j))
-
-        while queue:
-            i, j = queue.popleft()
-            revised = False
-            tmp = domains[i]
-            while tmp:
-                bit = tmp & (-tmp)
-                tmp &= tmp - 1
-                if domains[j] == bit:
-                    domains[i] &= ~bit
-                    revised = True
-            if revised:
-                if domains[i] == 0: return False
-                for k in comp_graph[i]:
-                    if k != j: queue.append((k, i))
-        return True
-
-    def lcv_sort(var, bits, domains, unassigned_mask):
-        if not USE_LCV or len(bits) > LCV_DOMAIN_LIMIT: return bits
-        def count_elim(bit):
-            count = 0
-            for nb in comp_graph[var]:
-                # Check if neighbor is unassigned using the bitmask
-                if (unassigned_mask & (1 << nb)) and (domains[nb] & bit):
-                    count += 1
-            return count
-        return sorted(bits, key=count_elim)
-
-    def backtrack(assignment, unassigned_mask, depth, ancestor_indices, domains):
-        node_counter[0] += 1
-        if node_counter[0] % NODE_CHECK_INTERVAL == 0:
-            if time.monotonic() - start_time > time_limit:
-                time_exceeded[0] = True
-
-        if time_exceeded[0]: return set()
-
-        if unassigned_mask == 0:
-            yield list(assignment)
-            return set()
-
-        # CS OPTIMIZATION 2: MRV via Bitmask Iteration (O(1) skips)
-        best_c, min_count, max_deg = -1, float('inf'), -1
-        tmp_unassigned = unassigned_mask
-        
-        while tmp_unassigned:
-            i = (tmp_unassigned & -tmp_unassigned).bit_length() - 1
-            tmp_unassigned &= tmp_unassigned - 1
-            
-            c_count = domains[i].bit_count()
-            if c_count == 0: return {i}
-            if c_count < min_count or (c_count == min_count and comp_degrees[i] > max_deg):
-                min_count = c_count
-                best_c = i
-                max_deg = comp_degrees[i]
-
-        available_bits = []
-        tmp = domains[best_c]
-        while tmp:
-            bit = tmp & (-tmp)
-            tmp &= tmp - 1
-            available_bits.append(bit)
-
-        available_bits = lcv_sort(best_c, available_bits, domains, unassigned_mask)
-        node_conflict_set = set()
-        
-        # CS OPTIMIZATION 1: State Memento (Trail Stack)
-        # Fast memory copy instead of logical re-calculation
-        saved_domains = domains[:]
-        failed_symmetric_bits = set()
-
-        for bit in available_bits:
-            if time_exceeded[0]: break
-            
-            # Symmetry Skip: If an identical day failed from this exact state, skip this one
-            if bit in failed_symmetric_bits:
-                continue
-                
-            d = BIT_TO_IDX[bit]
-            assignment[best_c] = d
-            ng_key = tuple(assignment)
-            
-            if ng_key in nogoods:
-                assignment[best_c] = None
-                continue
-
-            dead_end, fail_var = False, -1
-            
-            for neighbor in comp_graph[best_c]:
-                if (unassigned_mask & (1 << neighbor)) and (domains[neighbor] & bit):
-                    domains[neighbor] &= ~bit
-                    if domains[neighbor] == 0:
-                        dead_end = True
-                        fail_var = neighbor
-                        break
-
-            if not dead_end:
-                new_unassigned_mask = unassigned_mask & ~(1 << best_c)
-                child_gen = backtrack(assignment, new_unassigned_mask, depth + 1, ancestor_indices + [best_c], domains)
-                
-                found_any, child_conflict_set = False, set()
-                try:
-                    while True:
-                        sol = next(child_gen)
-                        found_any = True
-                        yield sol
-                except StopIteration as e:
-                    child_conflict_set = e.value if e.value else set()
-
-                node_conflict_set.update(child_conflict_set - {best_c})
-
-                if not found_any:
-                    add_nogood(ng_key)
-                    # If this was a dead branch, record it for symmetry breaking
-                    if bit in symmetric_group:
-                        failed_symmetric_bits.update(symmetric_group[bit])
-                        
-                    if child_conflict_set and child_conflict_set.issubset(set(ancestor_indices) | {best_c}):
-                        domains[:] = saved_domains # Restore state instantly
-                        assignment[best_c] = None
-                        return node_conflict_set
-            else:
-                node_conflict_set.add(fail_var)
-                if fail_var in set(ancestor_indices):
-                    domains[:] = saved_domains # Restore state instantly
-                    assignment[best_c] = None
-                    return node_conflict_set
-
-            # Restore state instantly
-            domains[:] = saved_domains
-            assignment[best_c] = None
-
-        return node_conflict_set
-
-    local_domains = list(comp_domains)
-    if USE_AC3 and not ac3(local_domains): return
-
-    initial_unassigned = (1 << n_comp) - 1
-    gen = backtrack([None] * n_comp, initial_unassigned, 0, [], local_domains)
-    try:
-        while True:
-            yield next(gen)
-            if time_exceeded[0]: break
-    except StopIteration:
-        pass
-
-
-def _solve_period_worker(worker_args: dict):
-    n              = worker_args["n"]
-    conflict_graph = worker_args["conflict_graph"]
-    domains        = worker_args["domains"]
-    time_limit     = worker_args["time_limit"]
-
-    start_time    = time.monotonic()
-    time_exceeded = [False]
-
-    components = _get_connected_components(n, conflict_graph)
-    component_solutions = []
-
-    for comp_indices in components:
-        if time_exceeded[0] or (time.monotonic() - start_time > time_limit): break
-
-        comp_n       = len(comp_indices)
-        comp_graph_l = [[] for _ in range(comp_n)]
-        comp_degrees = [0] * comp_n
-        comp_domains = [domains[idx] for idx in comp_indices]
-
-        local_map = {orig: local for local, orig in enumerate(comp_indices)}
-        for orig in comp_indices:
-            for neighbor in conflict_graph[orig]:
-                comp_graph_l[local_map[orig]].append(local_map[neighbor])
-                comp_degrees[local_map[orig]] += 1
-
-        if comp_n > GIANT_COMPONENT_THRESHOLD:
-            comp_sols = _solve_via_min_conflicts(comp_n, comp_graph_l, comp_domains, time_limit, start_time)
-        else:
-            comp_gen = _solve_single_component(
-                comp_n, comp_graph_l, comp_degrees, comp_domains,
-                time_limit, start_time, time_exceeded
-            )
-            comp_sols = list(itertools.islice(comp_gen, MAX_CARTESIAN_SOLUTIONS))
-
-        if not comp_sols: return
-        component_solutions.append(comp_sols)
-
-    for combined_solution in itertools.product(*component_solutions):
-        if time_exceeded[0] or (time.monotonic() - start_time > time_limit): break
-
-        full_assignment = [0] * n
-        for comp_indices, local_sol in zip(components, combined_solution):
-            for orig_idx, assigned_day in zip(comp_indices, local_sol):
-                full_assignment[orig_idx] = assigned_day
-
-        yield full_assignment
-
-
-def _queue_bridge(worker_args: dict, queue, period_idx: int) -> None:
-    try:
-        batch = []
-        for sol in _solve_period_worker(worker_args):
-            batch.append(sol)
-            if len(batch) >= BATCH_SIZE:
-                queue.put((period_idx, batch))
-                batch = []
-        if batch:
-            queue.put((period_idx, batch))
-    finally:
-        queue.put((period_idx, None))  
-
-
+# ---------------------------------------------------------------------------
+# Conflict detection
+# ---------------------------------------------------------------------------
 def _courses_conflict(course_a, course_b) -> bool:
-    a_map = {}
+    """Return True if scheduling course_a and course_b on the same day is forbidden."""
+    a_map: dict = {}
     for prog in course_a.programs:
         key = (prog.program_id, prog.year)
         if key not in a_map or prog.requirement == "Obligatory":
@@ -360,36 +67,408 @@ def _courses_conflict(course_a, course_b) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Connected-component decomposition
+# ---------------------------------------------------------------------------
+def _connected_components(n: int, adj: list[list[int]]) -> list[list[int]]:
+    """BFS decomposition of the conflict graph into independent sub-problems."""
+    visited   = [False] * n
+    components: list[list[int]] = []
+    for start in range(n):
+        if visited[start]:
+            continue
+        comp:  list[int] = []
+        queue: collections.deque = collections.deque([start])
+        visited[start] = True
+        while queue:
+            v = queue.popleft()
+            comp.append(v)
+            for nb in adj[v]:
+                if not visited[nb]:
+                    visited[nb] = True
+                    queue.append(nb)
+        components.append(comp)
+    return components
+
+
+# ---------------------------------------------------------------------------
+# Core CSP solver for a single connected component
+# ---------------------------------------------------------------------------
+def _solve_component(
+    n:        int,
+    adj:      list[list[int]],   # adjacency list (local indices)
+    domains:  list[int],         # bitmask domain per variable
+    deadline: float,             # monotonic time of hard cutoff
+    aborted:  list[bool],        # shared abort flag (list for mutability)
+):
+    node_counter = [0]
+
+    # -----------------------------------------------------------------------
+    # Symmetry Precomputation (Index Space)
+    # -----------------------------------------------------------------------
+    if USE_SYMMETRY:
+        footprint: dict[int, frozenset] = {}
+        all_bits: set[int] = set()
+        for d in domains:
+            tmp = d
+            while tmp:
+                b = tmp & (-tmp)
+                all_bits.add(b)
+                tmp &= tmp - 1
+        for b in all_bits:
+            fp = frozenset(i for i in range(n) if domains[i] & b)
+            footprint[b] = fp
+            
+        fp_to_bits: dict[frozenset, list[int]] = {}
+        for b, fp in footprint.items():
+            fp_to_bits.setdefault(fp, []).append(b)
+            
+        # canonical maps day_idx -> canonical_day_idx
+        canonical: dict[int, int] = {}
+        for fp, bits in fp_to_bits.items():
+            bits.sort()
+            canon_idx = bits[0].bit_length() - 1
+            for b in bits:
+                canonical[b.bit_length() - 1] = canon_idx
+    else:
+        canonical = {}
+
+    # -----------------------------------------------------------------------
+    # MAC
+    # -----------------------------------------------------------------------
+    def mac_propagate(
+        var:          int,
+        assigned_bit: int,
+        domains:      list[int],
+        trail:        list[tuple[int, int]],
+        pq:           list
+    ) -> bool:
+        queue: collections.deque = collections.deque()
+        for nb in adj[var]:
+            queue.append((nb, var))
+
+        while queue:
+            i, j = queue.popleft()
+            support_mask = domains[j]
+            if support_mask == 0:
+                return False
+                
+            # True AC3 for != constraints: prune 'b' from i if 'b' has no support in j.
+            # Support is entirely absent ONLY when domains[j] is forced to exactly 'b'.
+            if _bit_count(support_mask) == 1:
+                forced_bit = support_mask
+                if domains[i] & forced_bit:
+                    trail.append((i, domains[i]))
+                    domains[i] &= ~forced_bit
+                    if domains[i] == 0:
+                        return False
+                    heapq.heappush(pq, (_bit_count(domains[i]), -len(adj[i]), i))
+                    
+                    for k in adj[i]:
+                        if k != j:
+                            queue.append((k, i))
+        return True
+
+    # -----------------------------------------------------------------------
+    # Trail Undo
+    # -----------------------------------------------------------------------
+    def undo(domains: list[int], trail: list, target_len: int, pq: list) -> None:
+        while len(trail) > target_len:
+            v, old_mask = trail.pop()
+            domains[v] = old_mask
+            heapq.heappush(pq, (_bit_count(old_mask), -len(adj[v]), v))
+
+    # -----------------------------------------------------------------------
+    # Lazy Min-Heap Variable Ordering (MRV + Degree)
+    # -----------------------------------------------------------------------
+    def pick_var(unassigned: int, domains: list[int], pq: list) -> int:
+        while pq:
+            sz, neg_deg, v = pq[0]
+            # Discard if already assigned
+            if not ((unassigned >> v) & 1):
+                heapq.heappop(pq)
+                continue
+            actual_sz = _bit_count(domains[v])
+            # Discard stale records
+            if actual_sz > sz:
+                heapq.heappop(pq)
+                continue
+            return heapq.heappop(pq)[2]
+        return -1
+
+    # -----------------------------------------------------------------------
+    # LCV
+    # -----------------------------------------------------------------------
+    def order_values(var: int, domain_mask: int, domains: list[int], unassigned: int) -> list[int]:
+        sz = _bit_count(domain_mask)
+        bits = list(_bits(domain_mask))
+        
+        # Fast paths
+        if sz <= 1:
+            return bits
+        if not USE_LCV or sz > LCV_DOMAIN_LIMIT:
+            return bits
+            
+        def lcv_score(b: int) -> int:
+            count = 0
+            bit = 1 << b
+            for nb in adj[var]:
+                if (unassigned >> nb) & 1:
+                    count += bool(domains[nb] & bit)
+            return count
+
+        if sz == 2:
+            s0 = lcv_score(bits[0])
+            s1 = lcv_score(bits[1])
+            return bits if s0 <= s1 else [bits[1], bits[0]]
+
+        bits.sort(key=lcv_score)
+        return bits
+
+    # -----------------------------------------------------------------------
+    # Backtracking with CBJ
+    # -----------------------------------------------------------------------
+    def backtrack(
+        assignment:  list[int | None],
+        unassigned:  int,              
+        depth:       int,
+        trail:       list[tuple[int, int]],
+        domains:     list[int],
+        conf_sets:   list[set[int]],   
+        pq:          list
+    ):
+        node_counter[0] += 1
+        if node_counter[0] % NODE_CHECK_INTERVAL == 0:
+            if time.monotonic() > deadline:
+                aborted[0] = True
+
+        if aborted[0]: return set()
+        if unassigned == 0:
+            yield list(assignment)
+            return set()
+
+        var = pick_var(unassigned, domains, pq)
+        if var == -1: return set()
+        
+        # Clear inherited stale constraints
+        conf_sets[var].clear()
+
+        domain_mask = domains[var]
+        if domain_mask == 0: 
+            heapq.heappush(pq, (_bit_count(domains[var]), -len(adj[var]), var))
+            return set()
+
+        ordered_values = order_values(var, domain_mask, domains, unassigned)
+        failed_canonical: set[int] = set()
+        conflict_set: set[int] = set()
+        trail_before = len(trail)
+
+        for day_idx in ordered_values:
+            if aborted[0]: break
+
+            bit = 1 << day_idx
+
+            if USE_SYMMETRY:
+                canon_idx = canonical.get(day_idx, day_idx)
+                if canon_idx in failed_canonical and canon_idx != day_idx:
+                    conflict_set.update(conf_sets[var])
+                    continue
+
+            assignment[var] = day_idx
+            new_unassigned = unassigned & ~(1 << var)
+
+            trail_mark = len(trail)
+            wipeout    = False
+
+            for nb in adj[var]:
+                if (new_unassigned >> nb) & 1:
+                    if domains[nb] & bit:
+                        trail.append((nb, domains[nb]))
+                        domains[nb] &= ~bit
+                        heapq.heappush(pq, (_bit_count(domains[nb]), -len(adj[nb]), nb))
+                        if domains[nb] == 0:
+                            wipeout = True
+                            conf_sets[nb].add(var)
+                            break
+
+            if not wipeout and USE_MAC:
+                wipeout = not mac_propagate(var, bit, domains, trail, pq)
+
+            if wipeout:
+                undo(domains, trail, trail_mark, pq)
+                assignment[var] = None
+                if USE_SYMMETRY:
+                    failed_canonical.add(canonical.get(day_idx, day_idx))
+                conflict_set.update(conf_sets[var])
+                continue
+
+            child_gen = backtrack(
+                assignment, new_unassigned, depth + 1,
+                trail, domains, conf_sets, pq
+            )
+
+            found_any = False
+            child_conflict = set()
+            try:
+                while True:
+                    sol = next(child_gen)
+                    found_any = True
+                    yield sol
+            except StopIteration as e:
+                child_conflict = e.value or set()
+
+            undo(domains, trail, trail_mark, pq)
+            assignment[var] = None
+
+            if not found_any:
+                if USE_SYMMETRY:
+                    failed_canonical.add(canonical.get(day_idx, day_idx))
+                conflict_set.update(child_conflict - {var})
+
+                if USE_CBJ and conflict_set and var not in conflict_set:
+                    undo(domains, trail, trail_before, pq)
+                    heapq.heappush(pq, (_bit_count(domains[var]), -len(adj[var]), var))
+                    return conflict_set
+            else:
+                conflict_set.clear()
+
+        undo(domains, trail, trail_before, pq)
+        heapq.heappush(pq, (_bit_count(domains[var]), -len(adj[var]), var))
+        return conflict_set
+
+    # -----------------------------------------------------------------------
+    # Entry point
+    # -----------------------------------------------------------------------
+    local_domains = list(domains)
+
+    ac3_queue: collections.deque = collections.deque()
+    for i in range(n):
+        for j in adj[i]:
+            ac3_queue.append((i, j))
+            
+    while ac3_queue:
+        i, j = ac3_queue.popleft()
+        if _bit_count(local_domains[j]) == 1:
+            bit = local_domains[j]
+            if local_domains[i] & bit:
+                local_domains[i] &= ~bit
+                if local_domains[i] == 0:
+                    return
+                for k in adj[i]:
+                    if k != j:
+                        ac3_queue.append((k, i))
+
+    assignment  = [None] * n
+    trail:       list[tuple[int, int]] = []
+    conf_sets:   list[set[int]] = [set() for _ in range(n)]
+    initial_unassigned = (1 << n) - 1
+
+    pq = []
+    for i in range(n):
+        heapq.heappush(pq, (_bit_count(local_domains[i]), -len(adj[i]), i))
+
+    gen = backtrack(assignment, initial_unassigned, 0, trail, local_domains, conf_sets, pq)
+    try:
+        while True:
+            yield next(gen)
+            if aborted[0]: break
+    except StopIteration:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Component-decomposed solver
+# ---------------------------------------------------------------------------
+def _solve_period(
+    n:              int,
+    adj:            list[list[int]],
+    domains:        list[int],
+    deadline:       float,
+    aborted:        list[bool],
+):
+    components = _connected_components(n, adj)
+    comp_specs = []
+    
+    for comp_indices in components:
+        local      = {orig: loc for loc, orig in enumerate(comp_indices)}
+        cn         = len(comp_indices)
+        cadj       = [[] for _ in range(cn)]
+        cdom       = [domains[orig] for orig in comp_indices]
+        for orig in comp_indices:
+            for nb in adj[orig]:
+                cadj[local[orig]].append(local[nb])
+        comp_specs.append((comp_indices, cadj, cdom))
+
+    comp_sols = {}
+    shared_partial = [0] * n
+
+    def combine(comp_idx: int):
+        if comp_idx == len(comp_specs):
+            yield list(shared_partial)
+            return
+
+        comp_indices, cadj, cdom = comp_specs[comp_idx]
+
+        # Logic: Cache solutions locally if the space is small
+        if comp_idx not in comp_sols:
+            gen = _solve_component(len(comp_indices), cadj, cdom, deadline, aborted)
+            sols = []
+            for sol in gen:
+                sols.append(sol)
+                if len(sols) > MAX_CACHE_SOLS:
+                    break
+            else:
+                comp_sols[comp_idx] = sols
+            
+            if comp_idx not in comp_sols:
+                iterable = itertools.chain(sols, gen)
+                comp_sols[comp_idx] = None 
+            else:
+                iterable = comp_sols[comp_idx]
+        else:
+            if comp_sols[comp_idx] is not None:
+                iterable = comp_sols[comp_idx]
+            else:
+                iterable = _solve_component(len(comp_indices), cadj, cdom, deadline, aborted)
+
+        # Replay/Generate and apply assignments to the shared state array
+        for local_sol in iterable:
+            if aborted[0]: break
+            for loc_i, orig_i in enumerate(comp_indices):
+                shared_partial[orig_i] = local_sol[loc_i]
+            yield from combine(comp_idx + 1)
+
+    yield from combine(0)
+
+
+# ---------------------------------------------------------------------------
+# Main scheduler class
+# ---------------------------------------------------------------------------
 class BacktrackScheduler(Scheduler):
     TIME_LIMIT_SECONDS = 28
     _graph_cache: dict = {}
 
     def generate(self, courses: list, exam_periods: list):
         exam_courses = [c for c in courses if c.is_exam_required()]
-
-        if not exam_courses:
+        if not exam_courses or not exam_periods:
             return
 
-        if not exam_periods:
-            return
-
-        self._start_time    = time.monotonic()
-        self._time_exceeded = False
+        deadline   = time.monotonic() + self.TIME_LIMIT_SECONDS
+        aborted    = [False]
 
         n_all = len(exam_courses)
-        conflict_matrix = [[False] * n_all for _ in range(n_all)]
+        conflict_flat = [False] * (n_all * n_all)
         for i in range(n_all):
             for j in range(i + 1, n_all):
                 if _courses_conflict(exam_courses[i], exam_courses[j]):
-                    conflict_matrix[i][j] = True
-                    conflict_matrix[j][i] = True
+                    conflict_flat[i * n_all + j] = True
+                    conflict_flat[j * n_all + i] = True
 
         course_index = {c.course_id: idx for idx, c in enumerate(exam_courses)}
 
-        period_args = []
-        period_meta = []
-
         for period in exam_periods:
+            if aborted[0] or time.monotonic() > deadline: break
+
             available_dates = period.get_available_dates()
             if not available_dates: continue
 
@@ -406,22 +485,18 @@ class BacktrackScheduler(Scheduler):
                 period.moed,
                 frozenset(c.course_id for c in period_courses),
             )
-
             if cache_key in BacktrackScheduler._graph_cache:
-                conflict_graph, degrees = BacktrackScheduler._graph_cache[cache_key]
+                adj = BacktrackScheduler._graph_cache[cache_key]
             else:
-                conflict_graph = [[] for _ in range(n)]
-                degrees        = [0] * n
+                adj = [[] for _ in range(n)]
                 for i in range(n):
                     gi = course_index[period_courses[i].course_id]
                     for j in range(i + 1, n):
                         gj = course_index[period_courses[j].course_id]
-                        if conflict_matrix[gi][gj]:
-                            conflict_graph[i].append(j)
-                            conflict_graph[j].append(i)
-                            degrees[i] += 1
-                            degrees[j] += 1
-                BacktrackScheduler._graph_cache[cache_key] = (conflict_graph, degrees)
+                        if conflict_flat[gi * n_all + gj]:
+                            adj[i].append(j)
+                            adj[j].append(i)
+                BacktrackScheduler._graph_cache[cache_key] = adj
 
             domains = [0] * n
             for i, c in enumerate(period_courses):
@@ -432,70 +507,16 @@ class BacktrackScheduler(Scheduler):
                         mask |= (1 << d_idx)
                 domains[i] = mask
 
-            period_args.append({
-                "n":              n,
-                "conflict_graph": conflict_graph,
-                "domains":        domains,
-                "time_limit":     self.TIME_LIMIT_SECONDS,
-            })
-            period_meta.append((period, period_courses, available_dates))
+            for assignment in _solve_period(n, adj, domains, deadline, aborted):
+                if aborted[0] or time.monotonic() > deadline:
+                    aborted[0] = True
+                    break
 
-        if not period_args: return
-
-        def _emit(assignment_indices, period, period_courses, available_dates):
-            schedule = Schedule()
-            for idx, d_idx in enumerate(assignment_indices):
-                schedule.add_assignment(period_courses[idx], period.moed, available_dates[d_idx])
-            return schedule
-
-        try:
-            shared_queue = multiprocessing.Queue(maxsize=200)
-
-            with ProcessPoolExecutor() as executor:
-                futures = [
-                    executor.submit(_queue_bridge, args, shared_queue, idx)
-                    for idx, args in enumerate(period_args)
-                ]
-
-                active_workers = len(period_args)
-
-                while active_workers > 0:
-                    elapsed = time.monotonic() - self._start_time
-                    if elapsed > self.TIME_LIMIT_SECONDS:
-                        self._time_exceeded = True
-                        break
-
-                    try:
-                        period_idx, batch = shared_queue.get(timeout=0.5)
-                    except collections.deque.Empty if hasattr(collections, 'deque') else Exception:
-                        continue
-                    except Exception:
-                        continue
-
-                    if batch is None:
-                        active_workers -= 1
-                        continue
-
-                    period, period_courses, available_dates = period_meta[period_idx]
-
-                    for item in batch:
-                        if time.monotonic() - self._start_time > self.TIME_LIMIT_SECONDS:
-                            self._time_exceeded = True
-                            break
-                        yield _emit(item, period, period_courses, available_dates)
-
-                    if self._time_exceeded:
-                        break
-
-                if self._time_exceeded:
-                    executor.shutdown(wait=False, cancel_futures=True)
-
-        except Exception as e:
-            print(f"[Scheduler] Parallel error: {e}. Falling back to sequential.")
-            for args, (period, period_courses, available_dates) in zip(period_args, period_meta):
-                if self._time_exceeded: break
-                for assignment_indices in _solve_period_worker(args):
-                    if time.monotonic() - self._start_time > self.TIME_LIMIT_SECONDS:
-                        self._time_exceeded = True
-                        break
-                    yield _emit(assignment_indices, period, period_courses, available_dates)
+                schedule = Schedule()
+                for idx, d_idx in enumerate(assignment):
+                    schedule.add_assignment(
+                        period_courses[idx],
+                        period.moed,
+                        available_dates[d_idx],
+                    )
+                yield schedule0
