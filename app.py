@@ -1,4 +1,4 @@
-"""
+﻿"""
 app.py — Schedulix V2 (Python + CSS only)
 
 All UI is built in Python (src/ui/views.py) and styled with static/style.css.
@@ -56,6 +56,7 @@ state = {
     "gen_history": [],
     "flash": None,
     "active_semester": "",
+    "pagination": {}, # Tracks saved pagination per semester
 }
 
 CACHE_PATH = os.path.join(PROJECT_ROOT, "data", ".cache.pkl")
@@ -259,8 +260,6 @@ def build_context(screen=None):
     screen = screen or request.args.get("screen", "input")
     aleph_total = len(state["aleph_schedules"])
     bet_total = len(state["bet_schedules"])
-    aleph_page = _page_index(request.args.get("aleph_page"), aleph_total)
-    bet_page = _page_index(request.args.get("bet_page"), bet_total)
 
     courses_count = len(state["courses"])
     periods_count = len(state["periods"])
@@ -315,8 +314,6 @@ def build_context(screen=None):
         "active_bet": state["active_bet"],
         "preset_target_aleph": state["preset_target_aleph"],
         "preset_target_bet": state["preset_target_bet"],
-        "aleph_page": aleph_page,
-        "bet_page": bet_page,
         "aleph_total": aleph_total,
         "bet_total": bet_total,
         "schedule": None,
@@ -349,8 +346,32 @@ def build_context(screen=None):
     sem_aleph, sem_bet = schedules_for_semester(active_sem) if active_sem else (state["aleph_schedules"], state["bet_schedules"])
     sem_aleph_total = len(sem_aleph)
     sem_bet_total   = len(sem_bet)
-    sem_aleph_page  = _page_index(request.args.get("aleph_page"), sem_aleph_total)
-    sem_bet_page    = _page_index(request.args.get("bet_page"),   sem_bet_total)
+    
+    # Track Pagination per Semester
+    if "pagination" not in state:
+        state["pagination"] = {}
+    if active_sem and active_sem not in state["pagination"]:
+        state["pagination"][active_sem] = {"aleph": 0, "bet": 0}
+
+    sem_aleph_page = 0
+    sem_bet_page = 0
+
+    if active_sem:
+        req_a = request.args.get("aleph_page")
+        req_b = request.args.get("bet_page")
+
+        if req_a is not None:
+            state["pagination"][active_sem]["aleph"] = _page_index(req_a, sem_aleph_total)
+        else:
+            state["pagination"][active_sem]["aleph"] = min(state["pagination"][active_sem]["aleph"], max(0, sem_aleph_total - 1)) if sem_aleph_total else 0
+
+        if req_b is not None:
+            state["pagination"][active_sem]["bet"] = _page_index(req_b, sem_bet_total)
+        else:
+            state["pagination"][active_sem]["bet"] = min(state["pagination"][active_sem]["bet"], max(0, sem_bet_total - 1)) if sem_bet_total else 0
+
+        sem_aleph_page = state["pagination"][active_sem]["aleph"]
+        sem_bet_page   = state["pagination"][active_sem]["bet"]
 
     ctx["semesters"]        = semesters
     ctx["active_semester"]  = active_sem
@@ -807,48 +828,59 @@ def calendar_preset():
 
 @app.route("/export")
 def export_schedule():
-    sem = request.args.get("semester_view", state.get("active_semester", ""))
-    exp_aleph, exp_bet = schedules_for_semester(sem) if sem else (state["aleph_schedules"], state["bet_schedules"])
-    aleph_total = len(exp_aleph)
-    bet_total   = len(exp_bet)
-    aleph_page = _page_index(request.args.get("aleph_page"), aleph_total)
-    bet_page   = _page_index(request.args.get("bet_page"),   bet_total)
-
-    aleph_sched = exp_aleph[aleph_page] if aleph_total and aleph_page < aleph_total else None
-    bet_sched   = exp_bet[bet_page]     if bet_total   and bet_page   < bet_total   else None
-
+    sems = all_semesters()
+    if not sems:
+        return Response("No schedules to export.", mimetype="text/plain")
+        
     lines = [
         "=" * 70,
         "  SCHEDULIX — Exam Schedule Generator  |  Version 2.0",
         "=" * 70,
         f"  Selected Programs : {', '.join(str(p) for p in state['selected_programs'])}",
-        f"  Moed Aleph        : Schedule {aleph_page + 1} of {aleph_total}",
-        f"  Moed Bet          : Schedule {bet_page + 1} of {bet_total}",
         "=" * 70 + "\n",
     ]
-    for moed_label, sched in [
-        ("Moed Aleph  (מועד א׳)", aleph_sched),
-        ("Moed Bet  (מועד ב׳)", bet_sched),
-    ]:
-        lines.append("─" * 70)
-        lines.append(f"  {moed_label}")
-        lines.append("─" * 70)
-        if sched:
-            for e in schedule_to_entries(sched):
-                try:
-                    dt = datetime.strptime(e["date"], "%Y-%m-%d")
-                    date_str = dt.strftime("%d-%m-%Y (%A)")
-                except ValueError:
-                    date_str = e["date"]
-                lines.append(
-                    f"    {date_str:<28}  {e['course_name']:<35}  {e['instructor']}"
-                )
-        else:
-            lines.append("    (no schedule)")
-        lines.append("")
+    
+    for sem in sems:
+        exp_aleph, exp_bet = schedules_for_semester(sem)
+        aleph_total = len(exp_aleph)
+        bet_total   = len(exp_bet)
+        
+        # Retrieve the currently saved pagination for this specific semester
+        saved_pages = state.get("pagination", {}).get(sem, {"aleph": 0, "bet": 0})
+        aleph_page = saved_pages["aleph"]
+        bet_page = saved_pages["bet"]
+        
+        aleph_sched = exp_aleph[aleph_page] if aleph_total and aleph_page < aleph_total else None
+        bet_sched   = exp_bet[bet_page]     if bet_total   and bet_page   < bet_total   else None
+        
+        lines.append(f"### SEMESTER: {sem} ###")
+        lines.append(f"  Moed Aleph: Schedule {aleph_page + 1} of {aleph_total}")
+        lines.append(f"  Moed Bet  : Schedule {bet_page + 1} of {bet_total}")
+        lines.append("-" * 70)
 
-    sem_tag = sem.replace(" ", "_") if sem else "all"
-    fname = f"schedule_{sem_tag}_A{aleph_page + 1}_B{bet_page + 1}.txt"
+        for moed_label, sched in [
+            ("Moed Aleph  (מועד א׳)", aleph_sched),
+            ("Moed Bet  (מועד ב׳)", bet_sched),
+        ]:
+            lines.append("─" * 70)
+            lines.append(f"  {moed_label}")
+            lines.append("─" * 70)
+            if sched:
+                for e in schedule_to_entries(sched):
+                    try:
+                        dt = datetime.strptime(e["date"], "%Y-%m-%d")
+                        date_str = dt.strftime("%d-%m-%Y (%A)")
+                    except ValueError:
+                        date_str = e["date"]
+                    lines.append(
+                        f"    {date_str:<28}  {e['course_name']:<35}  {e['instructor']}"
+                    )
+            else:
+                lines.append("    (no schedule)")
+            lines.append("")
+        lines.append("\n")
+
+    fname = "schedule_all_semesters.txt"
     return Response(
         "\n".join(lines),
         mimetype="text/plain",

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Server-side HTML rendering for Schedulix (Python + CSS only).
 This module is responsible for generating the entire HTML structure of the application.
 Although the UI primarily relies on traditional form submissions and links handled by app.py,
@@ -879,9 +879,11 @@ def _render_output(ctx: dict) -> str:
     sem_tabs = ""
     for sem in semesters:
         active_cls = " active" if sem == active_sem else ""
+        # Let app.py read the saved indices for this semester from the state. 
+        # By not forcing aleph_page/bet_page in the URL, it naturally loads the saved ones.
         sem_tabs += (
             f'<a class="btn btn-secondary sem-tab{active_cls}" ' +
-            f'href="{_url("output", semester_view=sem, aleph_page=1, bet_page=1)}">' +
+            f'href="{_url("output", semester_view=sem)}">' +
             f'{_e(sem)}</a>'
         )
     if len(semesters) > 1:
@@ -905,25 +907,25 @@ def _render_output(ctx: dict) -> str:
             '<div class="dual-output-layout">' +
             '<div class="output-panel">' +
             '<div class="output-panel-header aleph">' +
-            '<span>? MOED ALEPH</span>' +
+            '<span>♦ MOED ALEPH</span>' +
             f'<span style="font-size:10px;color:rgba(79,142,247,.6);">{len(schedule.get("aleph_entries",[]))} exams</span>' +
             '</div>' +
             _render_result_calendar(schedule.get("aleph_entries", []), "aleph") +
             '</div>' +
             '<div class="output-panel">' +
             '<div class="output-panel-header bet">' +
-            '<span>? MOED BET</span>' +
+            '<span>♦ MOED BET</span>' +
             f'<span style="font-size:10px;color:rgba(232,131,79,.6);">{len(schedule.get("bet_entries",[]))} exams</span>' +
             '</div>' +
             _render_result_calendar(schedule.get("bet_entries", []), "bet") +
             '</div></div>'
         )
     else:
-        out_body = '<div class="empty-state"><div class="icon">??</div>No schedules yet ? generate from the Input screen.</div>'
+        out_body = '<div class="empty-state"><div class="icon">📭</div>No schedules yet — generate from the Input screen.</div>'
 
     export_disabled = "" if (aleph_total or bet_total) else " disabled"
-    export_href = f"/export?semester_view={_e(active_sem)}&aleph_page={aleph_page + 1}&bet_page={bet_page + 1}"
-    export_label = f"? Export {_e(active_sem)}" if active_sem else "? Export"
+    export_href = f"/export"
+    export_label = f"↓ Export All Semesters"
 
     return (
         '<div class="screen active">' +
