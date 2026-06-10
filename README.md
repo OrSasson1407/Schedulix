@@ -177,7 +177,9 @@ Schedulix
 ```
 
 ---
-
+**Start the application:**
+    ```bash
+    python app.py
 # Technologies
 
 - Python
