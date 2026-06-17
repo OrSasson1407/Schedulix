@@ -28,6 +28,7 @@ from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
 from src.models.ExamPeriod import ExamPeriod
+from src.models.Constraints import SchedulingConstraints
 from src.ui.views import (
     render_page,
     PROGRAM_NAMES,
@@ -57,6 +58,8 @@ state = {
     "flash": None,
     "active_semester": "",
     "pagination": {}, # Tracks saved pagination per semester
+    # User-configurable hard constraints (5 toggles + their k parameters).
+    "constraints": SchedulingConstraints.default_config(),
 }
 
 CACHE_PATH = os.path.join(PROJECT_ROOT, "data", ".cache.pkl")
@@ -317,6 +320,7 @@ def build_context(screen=None):
         "aleph_total": aleph_total,
         "bet_total": bet_total,
         "schedule": None,
+        "constraints": state.get("constraints", SchedulingConstraints.default_config()),
     }
 
     drilldown_id = request.args.get("drilldown")
@@ -450,15 +454,18 @@ def run_generation():
     state["aleph_schedules"] = []
     state["bet_schedules"] = []
 
+    # Build the active hard-constraint configuration once per generation run.
+    constraints = SchedulingConstraints(state.get("constraints"))
+
     def _run_aleph():
         sched = BacktrackScheduler()
-        for s in sched.generate(_make_filtered(), aleph_periods):
+        for s in sched.generate(_make_filtered(), aleph_periods, constraints):
             if s.assignments:
                 state["aleph_schedules"].append(s)
 
     def _run_bet():
         sched = BacktrackScheduler()
-        for s in sched.generate(_make_filtered(), bet_periods):
+        for s in sched.generate(_make_filtered(), bet_periods, constraints):
             if s.assignments:
                 state["bet_schedules"].append(s)
 
@@ -552,6 +559,25 @@ def public_files(filename):
 def index():
     ctx = build_context()
     return render_page(ctx)
+
+
+@app.route("/settings", methods=["POST"])
+def update_settings():
+    """Persists the 5 hard-constraint toggles and their integer k parameters."""
+    config = SchedulingConstraints.default_config()
+    for key in SchedulingConstraints.KEYS:
+        config[key]["enabled"] = request.form.get(f"{key}_enabled") == "1"
+        raw_k = request.form.get(f"{key}_k")
+        if raw_k is not None and str(raw_k).strip() != "":
+            try:
+                config[key]["k"] = int(raw_k)
+            except ValueError:
+                pass
+
+    # Normalise through the model so k values are clamped to their valid bounds.
+    state["constraints"] = SchedulingConstraints(config).to_dict()
+    set_flash("Constraint settings saved", "ok")
+    return redirect_screen("settings")
 
 
 @app.route("/set_mode", methods=["POST"])
