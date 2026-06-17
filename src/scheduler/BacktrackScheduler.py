@@ -448,10 +448,14 @@ class BacktrackScheduler(Scheduler):
     TIME_LIMIT_SECONDS = 28
     _graph_cache: dict = {}
 
-    def generate(self, courses: list, exam_periods: list):
+    def generate(self, courses: list, exam_periods: list, constraints=None):
         exam_courses = [c for c in courses if c.is_exam_required()]
         if not exam_courses or not exam_periods:
             return
+
+        # Optional user-defined hard constraints. A schedule that violates any
+        # active constraint is dropped before it is ever yielded to the caller.
+        apply_constraints = constraints is not None and constraints.any_enabled()
 
         deadline   = time.monotonic() + self.TIME_LIMIT_SECONDS
         aborted    = [False]
@@ -519,4 +523,10 @@ class BacktrackScheduler(Scheduler):
                         period.moed,
                         available_dates[d_idx],
                     )
+
+                # Hard-constraint gate: disqualify any schedule that violates an
+                # active user-configured constraint instead of yielding it.
+                if apply_constraints and not constraints.is_satisfied_by(schedule):
+                    continue
+
                 yield schedule

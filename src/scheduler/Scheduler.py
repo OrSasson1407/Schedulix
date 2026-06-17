@@ -16,12 +16,15 @@ class Scheduler(ABC):
     """
 
     @abstractmethod
-    def generate(self, courses: list, exam_periods: list) -> list:
+    def generate(self, courses: list, exam_periods: list, constraints=None) -> list:
         """
         Generates all valid exam schedules for the given courses within the given exam periods.
 
         :param courses: List of Course objects that require scheduling (exam-only).
         :param exam_periods: List of ExamPeriod objects defining valid date windows.
+        :param constraints: Optional SchedulingConstraints object. Any schedule that
+                            violates an active hard constraint is dropped before being
+                            returned. When None, no extra hard constraints are applied.
         :return: A list of Schedule objects, each representing one valid assignment.
         """
         pass

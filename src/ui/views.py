@@ -35,7 +35,53 @@ SCREEN_TITLES = {
     "input": "<strong>Input</strong> — Load files &amp; select programs",
     "calendar": "<strong>Calendar</strong> — Moed Aleph &amp; Moed Bet date configuration",
     "output": "<strong>Output</strong> — Browse &amp; export combined schedules",
+    "settings": "<strong>Settings</strong> — Configurable hard constraints",
 }
+
+# Metadata describing each configurable hard constraint. Drives the Settings UI.
+# 'min_k' encodes whether the parameter must be positive (1) or non-negative (0).
+CONSTRAINT_META = [
+    {
+        "key": "mandatory_spacing",
+        "label": "Mandatory Exam Spacing",
+        "desc": "Minimum number of days between any two mandatory course exams "
+                "within the same study program and the same year.",
+        "k_label": "Minimum days (k ≥ 1)",
+        "min_k": 1,
+    },
+    {
+        "key": "general_spacing",
+        "label": "General Exam Spacing",
+        "desc": "Minimum number of days between any two exams (mandatory or "
+                "elective) within the same study program and the same year.",
+        "k_label": "Minimum days (k ≥ 1)",
+        "min_k": 1,
+    },
+    {
+        "key": "elective_collisions",
+        "label": "Elective Collisions Limit",
+        "desc": "Maximum number of same-day collisions allowed between any two "
+                "elective courses within the same study program.",
+        "k_label": "Max collisions (k ≥ 0)",
+        "min_k": 0,
+    },
+    {
+        "key": "mandatory_window",
+        "label": "Mandatory Exam Window",
+        "desc": "Minimum number of days between the first and the last mandatory "
+                "exam for a specific program, year and term (Moed).",
+        "k_label": "Minimum days (k ≥ 1)",
+        "min_k": 1,
+    },
+    {
+        "key": "daily_capacity",
+        "label": "Daily Global Capacity",
+        "desc": "Maximum number of exams allowed on the exact same day across the "
+                "entire system.",
+        "k_label": "Max exams/day (k ≥ 1)",
+        "min_k": 1,
+    },
+]
 
 # Steps used for the quick pagination buttons in the output screen (e.g., jump 10 pages forward)
 PAGE_JUMP_STEPS = [1, 2, 3, 5, 10, 20, 50, 100, 200, 500, 1000]
@@ -168,6 +214,7 @@ def render_page(ctx: dict) -> str:
     for sid, icon, label in [
         ("input", "📁", "Input"),
         ("calendar", "📅", "Calendar"),
+        ("settings", "⚙️", "Settings"),
         ("output", "📊", "Output"),
     ]:
         active = " active" if screen == sid else ""
@@ -181,6 +228,8 @@ def render_page(ctx: dict) -> str:
         body = _render_input(ctx)
     elif screen == "calendar":
         body = _render_calendar(ctx)
+    elif screen == "settings":
+        body = _render_settings(ctx)
     else:
         body = _render_output(ctx)
 
@@ -687,6 +736,67 @@ def _render_gen_history(ctx: dict) -> str:
   <hr class="divider"/>
   <div class="gen-history-title">📋 Generation history (last 2)</div>
   <div class="gen-history-list">{"".join(items)}</div>
+</div>"""
+
+
+# ==========================================
+# SCREEN: SETTINGS (Configurable Hard Constraints)
+# ==========================================
+
+def _render_settings(ctx: dict) -> str:
+    """
+    Renders the 'Settings' screen where the user enables/disables each of the
+    five hard constraints and sets their individual integer parameter k.
+
+    Every constraint is a hard constraint: when enabled, any generated schedule
+    that violates it is immediately disqualified by the scheduler.
+    """
+    constraints = ctx.get("constraints", {})
+
+    cards = []
+    for meta in CONSTRAINT_META:
+        key = meta["key"]
+        cfg = constraints.get(key, {})
+        enabled = bool(cfg.get("enabled", False))
+        k_val = cfg.get("k", meta["min_k"])
+        checked = "checked" if enabled else ""
+        on_cls = " on" if enabled else ""
+
+        cards.append(f"""
+<div class="constraint-row{on_cls}">
+  <label class="switch">
+    <input type="checkbox" name="{_e(key)}_enabled" value="1" {checked}/>
+    <span class="switch-slider"></span>
+  </label>
+  <div class="constraint-info">
+    <div class="constraint-name">{_e(meta['label'])}</div>
+    <div class="constraint-desc">{_e(meta['desc'])}</div>
+  </div>
+  <div class="constraint-k">
+    <label for="{_e(key)}_k">{_e(meta['k_label'])}</label>
+    <input id="{_e(key)}_k" class="shift-input" type="number" name="{_e(key)}_k"
+           value="{_e(k_val)}" min="{meta['min_k']}" step="1"/>
+  </div>
+</div>""")
+
+    return f"""
+<div class="screen active">
+  <div class="card">
+    <div class="card-title">⚙️ Scheduling Hard Constraints</div>
+    <p style="color:var(--muted); font-size:13px; margin-bottom:16px;">
+      Each constraint below is a <strong>hard constraint</strong>: when enabled, any
+      generated schedule that violates it is dropped. Day differences count calendar
+      days (weekends and holidays included). Re-run <em>Generate</em> after changing these.
+    </p>
+    <form method="post" action="/settings">
+      <div class="constraint-list">
+        {"".join(cards)}
+      </div>
+      <div style="margin-top:18px;">
+        <button type="submit" class="btn btn-green">💾 Save Settings</button>
+      </div>
+    </form>
+  </div>
 </div>"""
 
 
