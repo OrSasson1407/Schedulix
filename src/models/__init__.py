@@ -7,6 +7,7 @@ from .Program import Program
 from .ExamDate import ExamDate
 from .ExamPeriod import ExamPeriod
 from .Schedule import Schedule
+from .Constraints import SchedulingConstraints
 
 # Define exactly what gets imported when someone uses 'from src.models import *'
-__all__ = ["Course", "Program", "ExamDate", "ExamPeriod", "Schedule"]
+__all__ = ["Course", "Program", "ExamDate", "ExamPeriod", "Schedule", "SchedulingConstraints"]
