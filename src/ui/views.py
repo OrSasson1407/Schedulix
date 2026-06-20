@@ -1025,6 +1025,64 @@ def _render_config_calendar(period: dict, moed_key: str, ctx: dict) -> str:
 # SCREEN: OUTPUT (Viewing Generated Results)
 # ==========================================
 
+def _render_sort_panel(ctx: dict) -> str:
+    """
+    Renders the dynamic multi-criteria sort controls for the Output screen.
+
+    The user picks an ordered set of criteria (Primary, Secondary, Tertiary, ...).
+    Submitting re-orders the already-generated schedules instantly without
+    re-running the scheduler. Every selected criterion sorts in descending order.
+    """
+    options = ctx.get("sort_options", [])
+    current = ctx.get("sort_criteria", [])
+    if not options:
+        return ""
+
+    active_sem = ctx.get("active_semester", "")
+    priority_labels = ["Primary", "Secondary", "Tertiary", "4th", "5th"]
+
+    slots = []
+    for i, prio in enumerate(priority_labels):
+        selected_key = current[i] if i < len(current) else ""
+        opts = [
+            f'<option value="" {"selected" if not selected_key else ""}>— none —</option>'
+        ]
+        for opt in options:
+            sel = "selected" if opt["key"] == selected_key else ""
+            opts.append(
+                f'<option value="{_e(opt["key"])}" {sel} title="{_e(opt["desc"])}">{_e(opt["label"])}</option>'
+            )
+        slots.append(f"""
+<div class="sort-slot">
+  <label class="sort-slot-label">{_e(prio)}</label>
+  <select class="filter" name="sort_{i + 1}">{"".join(opts)}</select>
+</div>""")
+
+    if current:
+        labels = {o["key"]: o["label"] for o in options}
+        active_txt = " ▸ ".join(_e(labels.get(k, k)) for k in current)
+        summary = f'<span class="sort-active">Active: {active_txt} <span style="color:var(--muted-soft)">(all descending)</span></span>'
+    else:
+        summary = '<span class="sort-active" style="color:var(--muted);">No sorting applied — generation order</span>'
+
+    return f"""
+<div class="card sort-panel">
+  <div class="card-title" style="margin-bottom:6px;">↕ Sort Schedules</div>
+  <p style="color:var(--muted); font-size:12px; margin-bottom:12px;">
+    Choose an ordered set of criteria. Each layer sorts in <strong>descending</strong> order
+    and re-orders the existing results instantly (no re-generation).
+  </p>
+  <form method="post" action="/sort">
+    <input type="hidden" name="semester_view" value="{_e(active_sem)}"/>
+    <div class="sort-slots">{"".join(slots)}</div>
+    <div style="display:flex; align-items:center; gap:14px; margin-top:14px; flex-wrap:wrap;">
+      <button type="submit" class="btn btn-green">Apply Sort</button>
+      {summary}
+    </div>
+  </form>
+</div>"""
+
+
 def _render_output(ctx: dict) -> str:
     aleph_page  = ctx.get("aleph_page", 0)
     bet_page    = ctx.get("bet_page", 0)
@@ -1084,9 +1142,12 @@ def _render_output(ctx: dict) -> str:
     export_href = f"/export"
     export_label = f"↓ Export All Semesters"
 
+    sort_panel = _render_sort_panel(ctx)
+
     return (
         '<div class="screen active">' +
         sem_bar +
+        sort_panel +
         '<div class="output-top-bar">' + aleph_toolbar + bet_toolbar + '</div>' +
         '<div class="export-bar">' +
         f'<a class="btn btn-primary" href="{export_href}"{export_disabled}>{export_label}</a>' +
