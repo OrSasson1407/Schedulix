@@ -977,3 +977,35 @@ button#generateBtn:hover,
 .switch input:checked + .switch-slider::before {
   transform: translateX(20px);
 }
+
+/* ===== Output: dynamic multi-criteria sort ===== */
+.sort-panel {
+  margin-bottom: 16px;
+}
+.sort-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.sort-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 160px;
+  flex: 1;
+}
+.sort-slot-label {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--muted-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sort-slot .filter {
+  width: 100%;
+}
+.sort-active {
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text);
+}
