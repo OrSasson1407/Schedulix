@@ -27,6 +27,7 @@ if PROJECT_ROOT not in sys.path:
 from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
+from src.scheduler.ScheduleSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
 from src.models.ExamPeriod import ExamPeriod
 from src.models.Constraints import SchedulingConstraints
 from src.ui.views import (
@@ -60,6 +61,8 @@ state = {
     "pagination": {}, # Tracks saved pagination per semester
     # User-configurable hard constraints (5 toggles + their k parameters).
     "constraints": SchedulingConstraints.default_config(),
+    # Ordered list of sort criteria keys (primary first). Empty = generation order.
+    "sort_criteria": [],
 }
 
 CACHE_PATH = os.path.join(PROJECT_ROOT, "data", ".cache.pkl")
@@ -321,6 +324,8 @@ def build_context(screen=None):
         "bet_total": bet_total,
         "schedule": None,
         "constraints": state.get("constraints", SchedulingConstraints.default_config()),
+        "sort_options": SORT_CRITERIA,
+        "sort_criteria": list(state.get("sort_criteria", [])),
     }
 
     drilldown_id = request.args.get("drilldown")
@@ -490,7 +495,20 @@ def run_generation():
     sems = _infer_semesters()
     if sems and state["active_semester"] not in sems:
         state["active_semester"] = sems[0]
+
+    # Apply the current sort preferences to the freshly generated results.
+    apply_sort()
     return len(state["aleph_schedules"]), len(state["bet_schedules"]), timed_out
+
+
+def apply_sort():
+    """
+    Re-orders the in-memory Aleph and Bet schedule lists according to the current
+    sort criteria. Runs purely on the existing results — it never re-generates.
+    """
+    criteria = state.get("sort_criteria", [])
+    state["aleph_schedules"] = sort_schedules(state["aleph_schedules"], criteria)
+    state["bet_schedules"] = sort_schedules(state["bet_schedules"], criteria)
 
 
 def schedules_for_semester(sem):
@@ -578,6 +596,36 @@ def update_settings():
     state["constraints"] = SchedulingConstraints(config).to_dict()
     set_flash("Constraint settings saved", "ok")
     return redirect_screen("settings")
+
+
+@app.route("/sort", methods=["POST"])
+def update_sort():
+    """
+    Updates the multi-criteria sort order and instantly re-orders the existing
+    in-memory schedules (no re-generation). Criteria arrive as ordered priority
+    slots: sort_1 (primary), sort_2 (secondary), sort_3 (tertiary), ...
+    """
+    criteria = []
+    slot = 1
+    while True:
+        val = request.form.get(f"sort_{slot}")
+        if val is None:
+            break
+        val = val.strip()
+        if val and val in METRIC_KEYS and val not in criteria:
+            criteria.append(val)
+        slot += 1
+
+    state["sort_criteria"] = criteria
+    apply_sort()
+    # Order changed, so reset pagination to show the new top-ranked schedules.
+    state["pagination"] = {}
+
+    if criteria:
+        set_flash(f"Sorted by {len(criteria)} criterion(s)", "ok")
+    else:
+        set_flash("Sorting cleared — showing generation order", "ok")
+    return redirect_screen("output", semester_view=state.get("active_semester", ""))
 
 
 @app.route("/set_mode", methods=["POST"])
