@@ -1,6 +1,6 @@
 """
 test_schedule_sorter.py
-Full coverage for src/scheduler/ScheduleSorter.py.
+Full coverage for src/scheduler/SchedulerSorter.py.
 
 The sorter is a pure, post-generation operation: it takes a list of already-valid
 Schedule objects and re-orders them by one or more metric keys (all layers
@@ -15,7 +15,7 @@ from datetime import datetime, date
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.models import Course, Program, Schedule, ExamDate
-from src.scheduler import ScheduleSorter as ss
+from src.scheduler import SchedulerSorter as ss
 from src.scheduler.SchedulerSorter import (
     SORT_CRITERIA,
     METRIC_KEYS,
