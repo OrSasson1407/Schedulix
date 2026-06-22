@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from src.models import Course, Program, Schedule, ExamDate
 from src.scheduler import ScheduleSorter as ss
-from src.scheduler.ScheduleSorter import (
+from src.scheduler.SchedulerSorter import (
     SORT_CRITERIA,
     METRIC_KEYS,
     compute_metrics,
