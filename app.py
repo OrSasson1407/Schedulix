@@ -27,7 +27,7 @@ if PROJECT_ROOT not in sys.path:
 from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
-from src.scheduler.SchedulerSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
+from src.scheduler.ScheduleSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
 from src.scheduler.whatif import WhatIfEngine
 from src.models.ExamPeriod import ExamPeriod
 from src.models.Constraints import SchedulingConstraints
@@ -36,7 +36,7 @@ from src.ui.views import (
     PROGRAM_NAMES,
     HOLIDAY_PRESETS,
     format_generate_result,
-    render_gen_history_html ,
+    render_gen_history_html,
 )
 
 app = Flask(__name__, static_folder="static")
@@ -62,8 +62,14 @@ state = {
     "pagination": {}, # Tracks saved pagination per semester
     # User-configurable hard constraints (5 toggles + their k parameters).
     "constraints": SchedulingConstraints.default_config(),
-    # Ordered list of sort criteria keys (primary first).  Empty = generation order.
+    # Ordered list of sort criteria keys (primary first). Empty = generation order.
     "sort_criteria": [],
+    # Exams locked by the user: set of "semester|moed_key|course_id".
+    "locked_exams": set(),
+    # User-defined holiday/event exclusions (for display on the calendar screen).
+    "custom_events": [],
+    # Undo stack of manual post-generation edits (drag-and-drop applies).
+    "edit_history": [],
 }
 
 CACHE_PATH = os.path.join(PROJECT_ROOT, "data", ".cache.pkl")
@@ -327,6 +333,9 @@ def build_context(screen=None):
         "constraints": state.get("constraints", SchedulingConstraints.default_config()),
         "sort_options": SORT_CRITERIA,
         "sort_criteria": list(state.get("sort_criteria", [])),
+        "can_undo": len(state.get("edit_history", [])) > 0,
+        "edit_count": len(state.get("edit_history", [])),
+        "custom_events": list(state.get("custom_events", [])),
     }
 
     drilldown_id = request.args.get("drilldown")
@@ -397,6 +406,11 @@ def build_context(screen=None):
         bet_entries = (
             schedule_to_entries(sem_bet[sem_bet_page]) if sem_bet_total else []
         )
+        locked = state.get("locked_exams", set())
+        for e in aleph_entries:
+            e["locked"] = f"{active_sem}|aleph|{e['course_id']}" in locked
+        for e in bet_entries:
+            e["locked"] = f"{active_sem}|bet|{e['course_id']}" in locked
         ctx["schedule"] = {
             "semester": active_sem,
             "aleph_entries": aleph_entries,
@@ -459,6 +473,9 @@ def run_generation():
     bet_periods = [p for p in effective_periods if p.moed == "Bet"]
     state["aleph_schedules"] = []
     state["bet_schedules"] = []
+    # A fresh run resets any manual edits / locks tied to the previous results.
+    state["edit_history"] = []
+    state["locked_exams"] = set()
 
     # Build the active hard-constraint configuration once per generation run.
     constraints = SchedulingConstraints(state.get("constraints"))
@@ -629,6 +646,23 @@ def update_sort():
     return redirect_screen("output", semester_view=state.get("active_semester", ""))
 
 
+def _displayed_schedule(scheds, active_sem, moed_key):
+    page = state.get("pagination", {}).get(active_sem, {}).get(moed_key, 0)
+    if not scheds or page >= len(scheds):
+        return None
+    return scheds[page]
+
+
+def _companion_dates(companion_schedule):
+    """Maps course_id -> exam date (date object) from the other moed's schedule."""
+    out = {}
+    if companion_schedule:
+        for (course, _moed), exam_date in companion_schedule.assignments.items():
+            raw = exam_date.date
+            out[course.course_id] = raw.date() if hasattr(raw, "date") else raw
+    return out
+
+
 def _active_whatif_engine(moed_key):
     """
     Builds a WhatIfEngine for the schedule currently displayed on the Output screen
@@ -641,14 +675,15 @@ def _active_whatif_engine(moed_key):
         aleph, bet = state["aleph_schedules"], state["bet_schedules"]
 
     if moed_key == "aleph":
-        scheds, moed = aleph, "Aleph"
+        scheds, moed, companion_key = aleph, "Aleph", "bet"
+        companion_scheds = bet
     else:
-        scheds, moed = bet, "Bet"
+        scheds, moed, companion_key = bet, "Bet", "aleph"
+        companion_scheds = aleph
 
-    page = state.get("pagination", {}).get(active_sem, {}).get(moed_key, 0)
-    if not scheds or page >= len(scheds):
+    schedule = _displayed_schedule(scheds, active_sem, moed_key)
+    if schedule is None:
         return None
-    schedule = scheds[page]
 
     period = next(
         (p for p in state["periods"] if p.moed == moed and p.semester == active_sem), None
@@ -658,7 +693,18 @@ def _active_whatif_engine(moed_key):
 
     available = get_effective_period(period).get_available_dates()
     constraints = SchedulingConstraints(state.get("constraints"))
-    engine = WhatIfEngine(schedule, available, moed, constraints)
+
+    companion = _companion_dates(_displayed_schedule(companion_scheds, active_sem, companion_key))
+    locked = {
+        key.split("|", 2)[2]
+        for key in state.get("locked_exams", set())
+        if key.startswith(f"{active_sem}|{moed_key}|")
+    }
+
+    engine = WhatIfEngine(
+        schedule, available, moed, constraints,
+        companion_dates=companion, locked=locked,
+    )
     return engine, schedule
 
 
@@ -706,14 +752,68 @@ def whatif_apply():
     if not built:
         return jsonify({"ok": False, "error": "No active schedule to edit"}), 400
     engine, schedule = built
+    # Snapshot the schedule BEFORE mutating it so the change can be undone.
+    snapshot = dict(schedule.assignments)
     try:
         result = engine.apply(course_id, new_date, schedule)
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+
+    state["edit_history"].append(
+        {
+            "schedule": schedule,
+            "assignments": snapshot,
+            "label": f"{course_id} → {new_date}",
+            "ts": datetime.now(),
+        }
+    )
+
     moves = 1 + len(result.get("cascade", []))
     set_flash(f"Applied {moves} move(s)" + ("" if result["solved"] else " — issues remain"),
               "ok" if result["solved"] else "err")
+    result["can_undo"] = True
     return jsonify(result)
+
+
+@app.route("/whatif/lock", methods=["POST"])
+def whatif_lock():
+    """Toggles the lock state of a single exam (locked exams cannot be moved)."""
+    moed_key = (request.form.get("moed") or "aleph").lower()
+    if moed_key not in ("aleph", "bet"):
+        moed_key = "aleph"
+    course_id = request.form.get("course_id", "")
+    if not course_id:
+        return jsonify({"ok": False, "error": "Missing course id"}), 400
+
+    active_sem = state.get("active_semester", "")
+    key = f"{active_sem}|{moed_key}|{course_id}"
+    locked = state["locked_exams"]
+    if key in locked:
+        locked.discard(key)
+        is_locked = False
+    else:
+        locked.add(key)
+        is_locked = True
+    return jsonify({"ok": True, "course_id": course_id, "locked": is_locked})
+
+
+@app.route("/whatif/undo", methods=["POST"])
+def whatif_undo():
+    """Rolls back the most recent manual edit, one step at a time."""
+    history = state["edit_history"]
+    if not history:
+        if _ajax_request():
+            return jsonify({"ok": False, "error": "Nothing to undo"}), 400
+        set_flash("Nothing to undo", "err")
+        return redirect_screen("output", semester_view=state.get("active_semester", ""))
+
+    entry = history.pop()
+    entry["schedule"].assignments = entry["assignments"]
+    set_flash(f"Undid: {entry['label']}", "ok")
+
+    if _ajax_request():
+        return jsonify({"ok": True, "remaining": len(history)})
+    return redirect_screen("output", semester_view=state.get("active_semester", ""))
 
 
 @app.route("/set_mode", methods=["POST"])
@@ -986,6 +1086,76 @@ def calendar_preset():
     return redirect_screen(
         "calendar", active_aleph=state["active_aleph"], active_bet=state["active_bet"]
     )
+
+
+@app.route("/calendar/custom_event", methods=["POST"])
+def calendar_custom_event():
+    """Excludes a user-defined event (single date or range) from the chosen moeds."""
+    name = (request.form.get("event_name") or "").strip() or "Custom event"
+    start = (request.form.get("start_date") or "").strip()
+    end = (request.form.get("end_date") or "").strip() or start
+    target_aleph = request.form.get("target_aleph") == "1"
+    target_bet = request.form.get("target_bet") == "1"
+
+    redirect_to = lambda: redirect_screen(
+        "calendar", active_aleph=state["active_aleph"], active_bet=state["active_bet"]
+    )
+
+    if not state["periods"]:
+        set_flash("Load calendar data first", "err")
+        return redirect_to()
+    if not start:
+        set_flash("Provide at least a start date", "err")
+        return redirect_to()
+    if not (target_aleph or target_bet):
+        target_aleph = target_bet = True
+
+    try:
+        d0 = datetime.strptime(start, "%Y-%m-%d")
+        d1 = datetime.strptime(end, "%Y-%m-%d")
+    except ValueError:
+        set_flash("Invalid date format", "err")
+        return redirect_to()
+    if d1 < d0:
+        d0, d1 = d1, d0
+
+    dates = []
+    cur = d0
+    while cur <= d1:
+        dates.append(cur.strftime("%Y-%m-%d"))
+        cur += timedelta(days=1)
+
+    periods = []
+    if target_aleph:
+        periods.extend(period_to_dict(p) for p in state["periods"] if p.moed == "Aleph")
+    if target_bet:
+        periods.extend(period_to_dict(p) for p in state["periods"] if p.moed == "Bet")
+
+    excluded = 0
+    for period in periods:
+        avail_set = set(period["available"])
+        all_set = set(period["all_dates"])
+        for date in dates:
+            if date in all_set and date in avail_set:
+                toggle_day(period["semester"], period["moed"], date)
+                excluded += 1
+
+    state["custom_events"].append(
+        {
+            "name": name,
+            "start": start,
+            "end": end if end != start else "",
+            "aleph": target_aleph,
+            "bet": target_bet,
+            "excluded": excluded,
+        }
+    )
+
+    if excluded:
+        set_flash(f"{name}: excluded {excluded} day(s)", "ok")
+    else:
+        set_flash(f"{name}: no matching available dates in the selected terms", "err")
+    return redirect_to()
 
 
 @app.route("/export")
