@@ -1,4 +1,4 @@
-﻿"""
+"""
 app.py — Schedulix V2 (Python + CSS only)
 
 All UI is built in Python (src/ui/views.py) and styled with static/style.css.
@@ -27,7 +27,10 @@ if PROJECT_ROOT not in sys.path:
 from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
+from src.scheduler.ScheduleSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
+from src.scheduler.whatif import WhatIfEngine
 from src.models.ExamPeriod import ExamPeriod
+from src.models.Constraints import SchedulingConstraints
 from src.ui.views import (
     render_page,
     PROGRAM_NAMES,
@@ -57,6 +60,10 @@ state = {
     "flash": None,
     "active_semester": "",
     "pagination": {}, # Tracks saved pagination per semester
+    # User-configurable hard constraints (5 toggles + their k parameters).
+    "constraints": SchedulingConstraints.default_config(),
+    # Ordered list of sort criteria keys (primary first). Empty = generation order.
+    "sort_criteria": [],
 }
 
 CACHE_PATH = os.path.join(PROJECT_ROOT, "data", ".cache.pkl")
@@ -317,6 +324,9 @@ def build_context(screen=None):
         "aleph_total": aleph_total,
         "bet_total": bet_total,
         "schedule": None,
+        "constraints": state.get("constraints", SchedulingConstraints.default_config()),
+        "sort_options": SORT_CRITERIA,
+        "sort_criteria": list(state.get("sort_criteria", [])),
     }
 
     drilldown_id = request.args.get("drilldown")
@@ -450,15 +460,18 @@ def run_generation():
     state["aleph_schedules"] = []
     state["bet_schedules"] = []
 
+    # Build the active hard-constraint configuration once per generation run.
+    constraints = SchedulingConstraints(state.get("constraints"))
+
     def _run_aleph():
         sched = BacktrackScheduler()
-        for s in sched.generate(_make_filtered(), aleph_periods):
+        for s in sched.generate(_make_filtered(), aleph_periods, constraints):
             if s.assignments:
                 state["aleph_schedules"].append(s)
 
     def _run_bet():
         sched = BacktrackScheduler()
-        for s in sched.generate(_make_filtered(), bet_periods):
+        for s in sched.generate(_make_filtered(), bet_periods, constraints):
             if s.assignments:
                 state["bet_schedules"].append(s)
 
@@ -483,7 +496,20 @@ def run_generation():
     sems = _infer_semesters()
     if sems and state["active_semester"] not in sems:
         state["active_semester"] = sems[0]
+
+    # Apply the current sort preferences to the freshly generated results.
+    apply_sort()
     return len(state["aleph_schedules"]), len(state["bet_schedules"]), timed_out
+
+
+def apply_sort():
+    """
+    Re-orders the in-memory Aleph and Bet schedule lists according to the current
+    sort criteria. Runs purely on the existing results — it never re-generates.
+    """
+    criteria = state.get("sort_criteria", [])
+    state["aleph_schedules"] = sort_schedules(state["aleph_schedules"], criteria)
+    state["bet_schedules"] = sort_schedules(state["bet_schedules"], criteria)
 
 
 def schedules_for_semester(sem):
@@ -552,6 +578,142 @@ def public_files(filename):
 def index():
     ctx = build_context()
     return render_page(ctx)
+
+
+@app.route("/settings", methods=["POST"])
+def update_settings():
+    """Persists the 5 hard-constraint toggles and their integer k parameters."""
+    config = SchedulingConstraints.default_config()
+    for key in SchedulingConstraints.KEYS:
+        config[key]["enabled"] = request.form.get(f"{key}_enabled") == "1"
+        raw_k = request.form.get(f"{key}_k")
+        if raw_k is not None and str(raw_k).strip() != "":
+            try:
+                config[key]["k"] = int(raw_k)
+            except ValueError:
+                pass
+
+    # Normalise through the model so k values are clamped to their valid bounds.
+    state["constraints"] = SchedulingConstraints(config).to_dict()
+    set_flash("Constraint settings saved", "ok")
+    return redirect_screen("settings")
+
+
+@app.route("/sort", methods=["POST"])
+def update_sort():
+    """
+    Updates the multi-criteria sort order and instantly re-orders the existing
+    in-memory schedules (no re-generation). Criteria arrive as ordered priority
+    slots: sort_1 (primary), sort_2 (secondary), sort_3 (tertiary), ...
+    """
+    criteria = []
+    slot = 1
+    while True:
+        val = request.form.get(f"sort_{slot}")
+        if val is None:
+            break
+        val = val.strip()
+        if val and val in METRIC_KEYS and val not in criteria:
+            criteria.append(val)
+        slot += 1
+
+    state["sort_criteria"] = criteria
+    apply_sort()
+    # Order changed, so reset pagination to show the new top-ranked schedules.
+    state["pagination"] = {}
+
+    if criteria:
+        set_flash(f"Sorted by {len(criteria)} criterion(s)", "ok")
+    else:
+        set_flash("Sorting cleared — showing generation order", "ok")
+    return redirect_screen("output", semester_view=state.get("active_semester", ""))
+
+
+def _active_whatif_engine(moed_key):
+    """
+    Builds a WhatIfEngine for the schedule currently displayed on the Output screen
+    for the given moed ('aleph'/'bet'). Returns (engine, schedule) or None.
+    """
+    active_sem = state.get("active_semester", "")
+    if active_sem:
+        aleph, bet = schedules_for_semester(active_sem)
+    else:
+        aleph, bet = state["aleph_schedules"], state["bet_schedules"]
+
+    if moed_key == "aleph":
+        scheds, moed = aleph, "Aleph"
+    else:
+        scheds, moed = bet, "Bet"
+
+    page = state.get("pagination", {}).get(active_sem, {}).get(moed_key, 0)
+    if not scheds or page >= len(scheds):
+        return None
+    schedule = scheds[page]
+
+    period = next(
+        (p for p in state["periods"] if p.moed == moed and p.semester == active_sem), None
+    ) or next((p for p in state["periods"] if p.moed == moed), None)
+    if not period:
+        return None
+
+    available = get_effective_period(period).get_available_dates()
+    constraints = SchedulingConstraints(state.get("constraints"))
+    engine = WhatIfEngine(schedule, available, moed, constraints)
+    return engine, schedule
+
+
+def _whatif_params():
+    moed_key = (request.form.get("moed") or "aleph").lower()
+    if moed_key not in ("aleph", "bet"):
+        moed_key = "aleph"
+    return moed_key, request.form.get("course_id", ""), request.form.get("new_date", "")
+
+
+@app.route("/whatif/preview", methods=["POST"])
+def whatif_preview():
+    """Instant 'domino effect' view for a hypothetical drag (no changes applied)."""
+    moed_key, course_id, new_date = _whatif_params()
+    built = _active_whatif_engine(moed_key)
+    if not built:
+        return jsonify({"ok": False, "error": "No active schedule to edit"}), 400
+    engine, _ = built
+    try:
+        report = engine.preview(course_id, new_date)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True, **report.to_dict()})
+
+
+@app.route("/whatif/resolve", methods=["POST"])
+def whatif_resolve():
+    """Returns the before/after violations and the minimal cascade plan."""
+    moed_key, course_id, new_date = _whatif_params()
+    built = _active_whatif_engine(moed_key)
+    if not built:
+        return jsonify({"ok": False, "error": "No active schedule to edit"}), 400
+    engine, _ = built
+    try:
+        return jsonify(engine.resolve(course_id, new_date))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.route("/whatif/apply", methods=["POST"])
+def whatif_apply():
+    """Commits the dragged move plus its resolved cascade onto the live schedule."""
+    moed_key, course_id, new_date = _whatif_params()
+    built = _active_whatif_engine(moed_key)
+    if not built:
+        return jsonify({"ok": False, "error": "No active schedule to edit"}), 400
+    engine, schedule = built
+    try:
+        result = engine.apply(course_id, new_date, schedule)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    moves = 1 + len(result.get("cascade", []))
+    set_flash(f"Applied {moves} move(s)" + ("" if result["solved"] else " — issues remain"),
+              "ok" if result["solved"] else "err")
+    return jsonify(result)
 
 
 @app.route("/set_mode", methods=["POST"])
