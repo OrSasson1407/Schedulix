@@ -27,6 +27,7 @@ class SchedulingConstraints:
         "elective_collisions",
         "mandatory_window",
         "daily_capacity",
+        "moed_spacing",
     )
 
     # Default state: every constraint is OFF so existing behaviour is unchanged
@@ -37,6 +38,7 @@ class SchedulingConstraints:
         "elective_collisions": {"enabled": False, "k": 0},
         "mandatory_window":    {"enabled": False, "k": 1},
         "daily_capacity":      {"enabled": False, "k": 1},
+        "moed_spacing":        {"enabled": False, "k": 1},
     }
 
     # k for these constraints must be a strictly positive integer; for
@@ -46,6 +48,7 @@ class SchedulingConstraints:
         "general_spacing",
         "mandatory_window",
         "daily_capacity",
+        "moed_spacing",
     }
 
     def __init__(self, config=None):
@@ -123,6 +126,10 @@ class SchedulingConstraints:
 
         if self.enabled("daily_capacity"):
             if not self._check_daily_capacity(schedule, self.k("daily_capacity")):
+                return False
+
+        if self.enabled("moed_spacing"):
+            if not self._check_moed_spacing(schedule, self.k("moed_spacing")):
                 return False
 
         return True
@@ -246,4 +253,26 @@ class SchedulingConstraints:
             counts[day] = counts.get(day, 0) + 1
             if counts[day] > k:
                 return False
+        return True
+
+    @classmethod
+    def _check_moed_spacing(cls, schedule, k):
+        """
+        For any course that has BOTH a Moed Aleph and a Moed Bet exam in this
+        schedule, the gap in calendar days between the two must be >= k. Courses
+        present in only one moed are ignored (nothing to space).
+
+        Note: the core engine generates each moed independently, so a single-moed
+        Schedule never trips this check. It applies to combined schedules and is
+        enforced interactively in the What-If editor via companion dates.
+        """
+        by_course = {}
+        for (course, moed), exam_date in schedule.assignments.items():
+            by_course.setdefault(course.course_id, {})[moed] = cls._day_of(exam_date)
+
+        for moeds in by_course.values():
+            if "Aleph" in moeds and "Bet" in moeds:
+                gap = abs((moeds["Aleph"] - moeds["Bet"]).days)
+                if gap < k:
+                    return False
         return True
