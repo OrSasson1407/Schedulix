@@ -81,6 +81,14 @@ CONSTRAINT_META = [
         "k_label": "Max exams/day (k ≥ 1)",
         "min_k": 1,
     },
+    {
+        "key": "moed_spacing",
+        "label": "Moed A → Moed B Spacing",
+        "desc": "Minimum number of days between the Moed Aleph and Moed Bet exam "
+                "of the same course.",
+        "k_label": "Minimum days (k ≥ 1)",
+        "min_k": 1,
+    },
 ]
 
 # Steps used for the quick pagination buttons in the output screen (e.g., jump 10 pages forward)
@@ -494,9 +502,24 @@ def render_page(ctx: dict) -> str:
 
   function wifDrag(e) {{
     var d = e.target.dataset;
+    if (d.locked === '1') {{ e.preventDefault(); wifToast('Exam is locked', 'err'); return; }}
     wifDrag_ = {{ course_id: d.courseId, moed: d.moed, from_date: d.date }};
     try {{ e.dataTransfer.setData('text/plain', d.courseId); }} catch (err) {{}}
     e.dataTransfer.effectAllowed = 'move';
+  }}
+
+  function wifToggleLock(e, btn) {{
+    e.stopPropagation();
+    var block = btn.parentNode;
+    var d = block.dataset;
+    wifPost('/whatif/lock', {{ moed: d.moed, course_id: d.courseId }}).then(function (data) {{
+      if (!data.ok) {{ wifToast(data.error || 'Lock failed', 'err'); return; }}
+      d.locked = data.locked ? '1' : '0';
+      block.classList.toggle('locked', data.locked);
+      block.setAttribute('draggable', data.locked ? 'false' : 'true');
+      btn.textContent = data.locked ? '🔒' : '🔓';
+      wifToast(data.locked ? 'Exam locked' : 'Exam unlocked', 'ok');
+    }}).catch(function () {{ wifToast('Lock failed', 'err'); }});
   }}
 
   function wifOver(e) {{
@@ -528,7 +551,7 @@ def render_page(ctx: dict) -> str:
     var params = {{ moed: wifDrag_.moed, course_id: wifDrag_.course_id, new_date: cell.date }};
     wifPending_ = params;
     wifPost('/whatif/resolve', params).then(function (data) {{
-      if (!data.ok) {{ wifToast(data.error || 'What-if failed', 'err'); return; }}
+      if (!data.ok) {{ wifShowError(data.error || 'This move is not allowed.'); return; }}
       wifShow(data);
     }}).catch(function () {{ wifToast('What-if failed', 'err'); }});
     wifDrag_ = null;
@@ -563,6 +586,23 @@ def render_page(ctx: dict) -> str:
     document.getElementById('wif-plan').innerHTML = planHtml;
     var applyBtn = document.getElementById('wif-apply');
     applyBtn.textContent = (data.solved && !b.legal && plan.length) ? 'Apply move + cascade' : 'Apply move';
+    document.getElementById('wif-body-normal').style.display = 'block';
+    document.getElementById('wif-body-error').style.display = 'none';
+    applyBtn.style.display = 'inline-flex';
+    document.getElementById('wif-overlay').style.display = 'flex';
+  }}
+
+  function wifShowError(message) {{
+    document.getElementById('wif-sub').textContent =
+      'Move ' + (wifPending_ ? wifPending_.course_id + ' \\u2192 ' + wifPending_.new_date +
+      '  (Moed ' + wifPending_.moed + ')' : '');
+    document.getElementById('wif-error').innerHTML =
+      '<div class="wif-item bad">\\uD83D\\uDCC5 ' + message + '</div>' +
+      '<div class="wif-empty">Exams can only be placed on available dates inside the exam period. ' +
+      'Drop the exam on a valid day to preview its domino effect.</div>';
+    document.getElementById('wif-body-normal').style.display = 'none';
+    document.getElementById('wif-body-error').style.display = 'block';
+    document.getElementById('wif-apply').style.display = 'none';
     document.getElementById('wif-overlay').style.display = 'flex';
   }}
 
@@ -585,12 +625,18 @@ def render_page(ctx: dict) -> str:
       '<button class="wif-close" onclick="wifHide()">\\u2715</button>',
       '<div class="wif-title">\\u26A1 What-If / Domino Effect</div>',
       '<div id="wif-sub" class="wif-subtitle"></div>',
+      '<div id="wif-body-normal">',
       '<div class="wif-section-title">Baseline requirements violated</div>',
       '<div id="wif-violations"></div>',
       '<div class="wif-section-title">Elective courses now colliding</div>',
       '<div id="wif-collisions"></div>',
       '<div class="wif-section-title">Minimal cascade to restore a legal schedule</div>',
       '<div id="wif-plan"></div>',
+      '</div>',
+      '<div id="wif-body-error" style="display:none;">',
+      '<div class="wif-section-title">Move not allowed</div>',
+      '<div id="wif-error"></div>',
+      '</div>',
       '<div class="wif-actions">',
       '<button class="btn btn-green" id="wif-apply" onclick="wifApply()">Apply</button>',
       '<button class="btn btn-secondary" onclick="wifHide()">Cancel</button>',
@@ -925,6 +971,46 @@ def _render_settings(ctx: dict) -> str:
 # SCREEN: CALENDAR (Moed Aleph & Bet Setup)
 # ==========================================
 
+def _render_custom_event_form(ctx: dict) -> str:
+    """
+    Renders the custom holiday/event exclusion tool: a name, a single date or a
+    date range, and the target moed(s). Applying it blocks those dates exactly
+    like a weekend or a holiday preset.
+    """
+    events = ctx.get("custom_events", [])
+    chips = ""
+    if events:
+        rows = ""
+        for ev in events:
+            span = ev["start"] + (f" → {ev['end']}" if ev.get("end") else "")
+            targets = "·".join(
+                t for t, on in (("A", ev.get("aleph")), ("B", ev.get("bet"))) if on
+            )
+            rows += (
+                '<span class="ce-chip">'
+                f'<strong>{_e(ev["name"])}</strong> '
+                f'<span class="ce-chip-span">{_e(span)}</span> '
+                f'<span class="ce-chip-moed">[{_e(targets)}]</span> '
+                f'<span class="ce-chip-count">−{ev.get("excluded", 0)}d</span>'
+                '</span>'
+            )
+        chips = f'<div class="ce-list">{rows}</div>'
+
+    return f"""
+<div class="custom-event-bar">
+  <span class="preset-bar-label">🛠 Custom event exclusion</span>
+  <form method="post" action="/calendar/custom_event" class="custom-event-form">
+    <input class="ce-input" type="text" name="event_name" placeholder="Event name" />
+    <label class="ce-field">From <input class="ce-input" type="date" name="start_date" required/></label>
+    <label class="ce-field">To <input class="ce-input" type="date" name="end_date" placeholder="(optional)"/></label>
+    <label class="ce-check"><input type="checkbox" name="target_aleph" value="1" checked/> Aleph</label>
+    <label class="ce-check"><input type="checkbox" name="target_bet" value="1" checked/> Bet</label>
+    <button type="submit" class="btn btn-secondary">Apply</button>
+  </form>
+  {chips}
+</div>"""
+
+
 def _render_calendar(ctx: dict) -> str:
     """
     Renders the 'Calendar' configuration screen.
@@ -955,6 +1041,8 @@ def _render_calendar(ctx: dict) -> str:
 
     aleph_on = " on" if pt_a else ""
     bet_on = " on" if pt_b else ""
+
+    custom_event_form = _render_custom_event_form(ctx)
 
     # Generate the calendar grids
     aleph_panel = _render_moed_panel("aleph", aleph, active_a, ctx) if aleph else (
@@ -990,7 +1078,9 @@ def _render_calendar(ctx: dict) -> str:
       </form>
     </div>
   </div>
-  
+
+  {custom_event_form}
+
   <div class="dual-cal-layout">
     <div class="moed-panel aleph">
       <div class="moed-header">
@@ -1263,6 +1353,17 @@ def _render_output(ctx: dict) -> str:
     export_href = f"/export"
     export_label = f"↓ Export All Semesters"
 
+    can_undo = ctx.get("can_undo", False)
+    edit_count = ctx.get("edit_count", 0)
+    undo_disabled = "" if can_undo else " disabled"
+    undo_label = "↶ Undo" + (f" ({edit_count})" if edit_count else "")
+    undo_btn = (
+        '<form method="post" action="/whatif/undo" style="display:inline;">'
+        f'<input type="hidden" name="semester_view" value="{_e(active_sem)}"/>'
+        f'<button type="submit" class="btn btn-secondary"{undo_disabled}>{undo_label}</button>'
+        '</form>'
+    )
+
     sort_panel = _render_sort_panel(ctx)
 
     return (
@@ -1272,7 +1373,8 @@ def _render_output(ctx: dict) -> str:
         '<div class="output-top-bar">' + aleph_toolbar + bet_toolbar + '</div>' +
         '<div class="export-bar">' +
         f'<a class="btn btn-primary" href="{export_href}"{export_disabled}>{export_label}</a>' +
-        '<span class="wif-hint">💡 Drag any exam to another day to preview the domino effect</span>' +
+        undo_btn +
+        '<span class="wif-hint">💡 Drag any exam to another day to preview the domino effect · 🔒 lock to freeze an exam</span>' +
         '</div>' +
         out_body +
         '</div>'
@@ -1435,10 +1537,12 @@ def _render_result_calendar(entries: list, moed: str) -> str:
                 req = "obligatory" if e["requirement"] == "Obligatory" else "elective"
                 title = _e(f"{e['course_name']} ({e['instructor']})")
                 progs_str = _e(", ".join(e.get("programs", [])))
+                is_locked = bool(e.get("locked"))
+                locked_cls = " locked" if is_locked else ""
+                lock_icon = "🔒" if is_locked else "🔓"
                 exam_html += (
-                    f'<div class="exam-block {req} {moed}" title="{title}" '
-                    f'style="cursor:grab;" '
-                    f'draggable="true" ondragstart="wifDrag(event)" '
+                    f'<div class="exam-block {req} {moed}{locked_cls}" title="{title}" '
+                    f'draggable="{"false" if is_locked else "true"}" ondragstart="wifDrag(event)" '
                     f'data-course-id="{_e(e["course_id"])}" '
                     f'data-course-name="{_e(e["course_name"])}" '
                     f'data-instructor="{_e(e["instructor"])}" '
@@ -1446,8 +1550,12 @@ def _render_result_calendar(entries: list, moed: str) -> str:
                     f'data-programs="{progs_str}" '
                     f'data-date="{_e(e["date"])}" '
                     f'data-moed="{_e(moed)}" '
-                    f'onclick="showCourseModal(this)">'
-                    f'{_e(e["course_id"])} {_e(e["course_name"])}</div>'
+                    f'data-locked="{1 if is_locked else 0}">'
+                    f'<button type="button" class="exam-lock" title="Lock / unlock exam" '
+                    f'onclick="wifToggleLock(event, this)">{lock_icon}</button>'
+                    f'<span class="exam-block-label" onclick="showCourseModal(this.parentNode)">'
+                    f'{_e(e["course_id"])} {_e(e["course_name"])}</span>'
+                    f'</div>'
                 )
             cells += (
                 f'<div class="out-cal-day" data-date="{date_str}" data-moed="{_e(moed)}" '
