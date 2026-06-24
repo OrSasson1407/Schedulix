@@ -27,7 +27,7 @@ if PROJECT_ROOT not in sys.path:
 from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
-from src.scheduler.ScheduleSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
+from src.scheduler.SchedulerSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
 from src.scheduler.whatif import WhatIfEngine
 from src.models.ExamPeriod import ExamPeriod
 from src.models.Constraints import SchedulingConstraints
@@ -36,7 +36,7 @@ from src.ui.views import (
     PROGRAM_NAMES,
     HOLIDAY_PRESETS,
     format_generate_result,
-    render_gen_history_html,
+    render_gen_history_html ,
 )
 
 app = Flask(__name__, static_folder="static")
@@ -62,7 +62,7 @@ state = {
     "pagination": {}, # Tracks saved pagination per semester
     # User-configurable hard constraints (5 toggles + their k parameters).
     "constraints": SchedulingConstraints.default_config(),
-    # Ordered list of sort criteria keys (primary first). Empty = generation order.
+    # Ordered list of sort criteria keys (primary first).  Empty = generation order.
     "sort_criteria": [],
 }
 
