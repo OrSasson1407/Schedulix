@@ -1009,3 +1009,88 @@ button#generateBtn:hover,
   font-family: var(--mono);
   color: var(--text);
 }
+
+/* ===== What-If / Domino-Effect ===== */
+.wif-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: 14px;
+}
+.out-cal-day.wif-drop-hover {
+  outline: 2px dashed var(--green);
+  outline-offset: -2px;
+  background: rgba(46, 204, 138, 0.10);
+}
+.wif-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 26px 30px;
+  width: 90%;
+  max-width: 520px;
+  max-height: 84vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  position: relative;
+}
+.wif-close {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}
+.wif-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+.wif-subtitle {
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--muted);
+  margin: 4px 0 16px;
+}
+.wif-section-title {
+  font-size: 11px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted-soft);
+  margin: 16px 0 6px;
+}
+.wif-item {
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  margin-bottom: 5px;
+  background: var(--surface2);
+  border-left: 3px solid var(--border);
+}
+.wif-item.bad { border-left-color: var(--red); }
+.wif-item.warn { border-left-color: var(--yellow); }
+.wif-empty {
+  font-size: 12px;
+  color: var(--muted-soft);
+  padding: 4px 0;
+}
+.wif-move {
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  margin-bottom: 5px;
+  background: rgba(46, 204, 138, 0.08);
+  border-left: 3px solid var(--green);
+  color: var(--text);
+}
+.wif-ok { font-size: 13px; color: var(--green); padding: 6px 0; }
+.wif-bad { font-size: 13px; color: var(--red); padding: 6px 0; }
+.wif-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
