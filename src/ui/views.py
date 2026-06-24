@@ -478,6 +478,127 @@ def render_page(ctx: dict) -> str:
   function hideCourseModal() {{
     document.getElementById('course-modal-overlay').style.display = 'none';
   }}
+
+  // ===== What-If / Domino-Effect drag & drop =====
+  var wifDrag_ = null;     // the exam currently being dragged
+  var wifPending_ = null;  // the move awaiting Apply
+
+  function wifToast(msg, type) {{
+    var el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'show ' + (type || 'ok');
+    clearTimeout(el._t);
+    el._t = setTimeout(function () {{ el.className = ''; }}, 2800);
+  }}
+
+  function wifDrag(e) {{
+    var d = e.target.dataset;
+    wifDrag_ = {{ course_id: d.courseId, moed: d.moed, from_date: d.date }};
+    try {{ e.dataTransfer.setData('text/plain', d.courseId); }} catch (err) {{}}
+    e.dataTransfer.effectAllowed = 'move';
+  }}
+
+  function wifOver(e) {{
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    e.currentTarget.classList.add('wif-drop-hover');
+  }}
+
+  function wifLeave(e) {{ e.currentTarget.classList.remove('wif-drop-hover'); }}
+
+  function wifPost(url, params) {{
+    return fetch(url, {{
+      method: 'POST',
+      headers: {{
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-Requested-With': 'Schedulix'
+      }},
+      body: new URLSearchParams(params).toString()
+    }}).then(function (r) {{ return r.json(); }});
+  }}
+
+  function wifDrop(e) {{
+    e.preventDefault();
+    e.currentTarget.classList.remove('wif-drop-hover');
+    var cell = e.currentTarget.dataset;
+    if (!wifDrag_) return;
+    if (cell.moed !== wifDrag_.moed) {{ wifToast('Drag within the same moed', 'err'); return; }}
+    if (cell.date === wifDrag_.from_date) {{ wifDrag_ = null; return; }}
+    var params = {{ moed: wifDrag_.moed, course_id: wifDrag_.course_id, new_date: cell.date }};
+    wifPending_ = params;
+    wifPost('/whatif/resolve', params).then(function (data) {{
+      if (!data.ok) {{ wifToast(data.error || 'What-if failed', 'err'); return; }}
+      wifShow(data);
+    }}).catch(function () {{ wifToast('What-if failed', 'err'); }});
+    wifDrag_ = null;
+  }}
+
+  function wifList(items, empty, cls) {{
+    if (!items || !items.length) return '<div class="wif-empty">' + empty + '</div>';
+    return items.map(function (v) {{
+      return '<div class="wif-item ' + (cls || '') + '">' + v.message + '</div>';
+    }}).join('');
+  }}
+
+  function wifShow(data) {{
+    var b = data.before || {{}};
+    var plan = data.plan || [];
+    var planHtml;
+    if (b.legal) {{
+      planHtml = '<div class="wif-ok">This move is already legal — no cascade needed.</div>';
+    }} else if (data.solved) {{
+      planHtml = plan.map(function (m, i) {{
+        return '<div class="wif-move">' + (i + 1) + '. Move <strong>' + m.course_name +
+               '</strong>: ' + m.from_date + ' \\u2192 ' + m.to_date + '</div>';
+      }}).join('');
+      if (!plan.length) planHtml = '<div class="wif-ok">Legal — no cascade needed.</div>';
+    }} else {{
+      planHtml = '<div class="wif-bad">No legal fix found within the move/time limit.</div>';
+    }}
+    document.getElementById('wif-sub').textContent =
+      'Move ' + wifPending_.course_id + ' \\u2192 ' + wifPending_.new_date + '  (Moed ' + wifPending_.moed + ')';
+    document.getElementById('wif-violations').innerHTML = wifList(b.violations, 'None \\uD83C\\uDF89', 'bad');
+    document.getElementById('wif-collisions').innerHTML = wifList(b.collisions, 'None', 'warn');
+    document.getElementById('wif-plan').innerHTML = planHtml;
+    var applyBtn = document.getElementById('wif-apply');
+    applyBtn.textContent = (data.solved && !b.legal && plan.length) ? 'Apply move + cascade' : 'Apply move';
+    document.getElementById('wif-overlay').style.display = 'flex';
+  }}
+
+  function wifHide() {{ document.getElementById('wif-overlay').style.display = 'none'; }}
+
+  function wifApply() {{
+    if (!wifPending_) return;
+    wifPost('/whatif/apply', wifPending_).then(function (data) {{
+      if (!data.ok) {{ wifToast(data.error || 'Apply failed', 'err'); return; }}
+      window.location.href = '/?screen=output';
+    }}).catch(function () {{ wifToast('Apply failed', 'err'); }});
+  }}
+
+  (function () {{
+    var o = document.createElement('div');
+    o.id = 'wif-overlay';
+    o.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;align-items:center;justify-content:center;';
+    o.innerHTML = [
+      '<div class="wif-modal">',
+      '<button class="wif-close" onclick="wifHide()">\\u2715</button>',
+      '<div class="wif-title">\\u26A1 What-If / Domino Effect</div>',
+      '<div id="wif-sub" class="wif-subtitle"></div>',
+      '<div class="wif-section-title">Baseline requirements violated</div>',
+      '<div id="wif-violations"></div>',
+      '<div class="wif-section-title">Elective courses now colliding</div>',
+      '<div id="wif-collisions"></div>',
+      '<div class="wif-section-title">Minimal cascade to restore a legal schedule</div>',
+      '<div id="wif-plan"></div>',
+      '<div class="wif-actions">',
+      '<button class="btn btn-green" id="wif-apply" onclick="wifApply()">Apply</button>',
+      '<button class="btn btn-secondary" onclick="wifHide()">Cancel</button>',
+      '</div></div>'
+    ].join('');
+    document.body.appendChild(o);
+    o.addEventListener('click', function (e) {{ if (e.target === o) wifHide(); }});
+  }})();
 </script>
 </body>
 </html>"""
@@ -1151,6 +1272,7 @@ def _render_output(ctx: dict) -> str:
         '<div class="output-top-bar">' + aleph_toolbar + bet_toolbar + '</div>' +
         '<div class="export-bar">' +
         f'<a class="btn btn-primary" href="{export_href}"{export_disabled}>{export_label}</a>' +
+        '<span class="wif-hint">💡 Drag any exam to another day to preview the domino effect</span>' +
         '</div>' +
         out_body +
         '</div>'
@@ -1315,7 +1437,8 @@ def _render_result_calendar(entries: list, moed: str) -> str:
                 progs_str = _e(", ".join(e.get("programs", [])))
                 exam_html += (
                     f'<div class="exam-block {req} {moed}" title="{title}" '
-                    f'style="cursor:pointer;" '
+                    f'style="cursor:grab;" '
+                    f'draggable="true" ondragstart="wifDrag(event)" '
                     f'data-course-id="{_e(e["course_id"])}" '
                     f'data-course-name="{_e(e["course_name"])}" '
                     f'data-instructor="{_e(e["instructor"])}" '
@@ -1326,7 +1449,11 @@ def _render_result_calendar(entries: list, moed: str) -> str:
                     f'onclick="showCourseModal(this)">'
                     f'{_e(e["course_id"])} {_e(e["course_name"])}</div>'
                 )
-            cells += f'<div class="out-cal-day"><div class="out-day-num">{d}</div>{exam_html}</div>'
+            cells += (
+                f'<div class="out-cal-day" data-date="{date_str}" data-moed="{_e(moed)}" '
+                f'ondragover="wifOver(event)" ondragleave="wifLeave(event)" ondrop="wifDrop(event)">'
+                f'<div class="out-day-num">{d}</div>{exam_html}</div>'
+            )
             
         blocks.append(
             f'<div class="month-block"><div class="month-label">{_e(month_str)}</div>'

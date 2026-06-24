@@ -1,4 +1,4 @@
-﻿"""
+"""
 app.py — Schedulix V2 (Python + CSS only)
 
 All UI is built in Python (src/ui/views.py) and styled with static/style.css.
@@ -28,6 +28,7 @@ from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
 from src.scheduler.ScheduleSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
+from src.scheduler.whatif import WhatIfEngine
 from src.models.ExamPeriod import ExamPeriod
 from src.models.Constraints import SchedulingConstraints
 from src.ui.views import (
@@ -626,6 +627,93 @@ def update_sort():
     else:
         set_flash("Sorting cleared — showing generation order", "ok")
     return redirect_screen("output", semester_view=state.get("active_semester", ""))
+
+
+def _active_whatif_engine(moed_key):
+    """
+    Builds a WhatIfEngine for the schedule currently displayed on the Output screen
+    for the given moed ('aleph'/'bet'). Returns (engine, schedule) or None.
+    """
+    active_sem = state.get("active_semester", "")
+    if active_sem:
+        aleph, bet = schedules_for_semester(active_sem)
+    else:
+        aleph, bet = state["aleph_schedules"], state["bet_schedules"]
+
+    if moed_key == "aleph":
+        scheds, moed = aleph, "Aleph"
+    else:
+        scheds, moed = bet, "Bet"
+
+    page = state.get("pagination", {}).get(active_sem, {}).get(moed_key, 0)
+    if not scheds or page >= len(scheds):
+        return None
+    schedule = scheds[page]
+
+    period = next(
+        (p for p in state["periods"] if p.moed == moed and p.semester == active_sem), None
+    ) or next((p for p in state["periods"] if p.moed == moed), None)
+    if not period:
+        return None
+
+    available = get_effective_period(period).get_available_dates()
+    constraints = SchedulingConstraints(state.get("constraints"))
+    engine = WhatIfEngine(schedule, available, moed, constraints)
+    return engine, schedule
+
+
+def _whatif_params():
+    moed_key = (request.form.get("moed") or "aleph").lower()
+    if moed_key not in ("aleph", "bet"):
+        moed_key = "aleph"
+    return moed_key, request.form.get("course_id", ""), request.form.get("new_date", "")
+
+
+@app.route("/whatif/preview", methods=["POST"])
+def whatif_preview():
+    """Instant 'domino effect' view for a hypothetical drag (no changes applied)."""
+    moed_key, course_id, new_date = _whatif_params()
+    built = _active_whatif_engine(moed_key)
+    if not built:
+        return jsonify({"ok": False, "error": "No active schedule to edit"}), 400
+    engine, _ = built
+    try:
+        report = engine.preview(course_id, new_date)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True, **report.to_dict()})
+
+
+@app.route("/whatif/resolve", methods=["POST"])
+def whatif_resolve():
+    """Returns the before/after violations and the minimal cascade plan."""
+    moed_key, course_id, new_date = _whatif_params()
+    built = _active_whatif_engine(moed_key)
+    if not built:
+        return jsonify({"ok": False, "error": "No active schedule to edit"}), 400
+    engine, _ = built
+    try:
+        return jsonify(engine.resolve(course_id, new_date))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.route("/whatif/apply", methods=["POST"])
+def whatif_apply():
+    """Commits the dragged move plus its resolved cascade onto the live schedule."""
+    moed_key, course_id, new_date = _whatif_params()
+    built = _active_whatif_engine(moed_key)
+    if not built:
+        return jsonify({"ok": False, "error": "No active schedule to edit"}), 400
+    engine, schedule = built
+    try:
+        result = engine.apply(course_id, new_date, schedule)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    moves = 1 + len(result.get("cascade", []))
+    set_flash(f"Applied {moves} move(s)" + ("" if result["solved"] else " — issues remain"),
+              "ok" if result["solved"] else "err")
+    return jsonify(result)
 
 
 @app.route("/set_mode", methods=["POST"])
