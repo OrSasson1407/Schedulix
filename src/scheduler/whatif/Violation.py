@@ -1,28 +1,24 @@
 """
 Violation.py
 
-Small value objects used by the what-if scheduler to describe schedule problems.
+Value objects describing what is wrong with a hypothetical schedule.
 
-A Violation is one broken rule.
-A ViolationReport groups all schedule problems found by the ConstraintEvaluator.
-
-Hard violations affect legality.
-Informational collisions are shown to the user but do not necessarily make the
-schedule illegal.
+A Violation is one broken rule. A ViolationReport aggregates all of them and can
+group the involved courses into independent "components" — the count of those
+components is the admissible heuristic used by the A* cascade search.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 
 
 @dataclass(frozen=True)
 class Violation:
-    kind: str
-    message: str
-    courses: Tuple[str, ...] = field(default_factory=tuple)
-    program_id: Optional[str] = None
-    year: Optional[int] = None
-    severity: str = "hard"
+    kind: str            # e.g. "baseline", "mandatory_spacing", "daily_capacity"
+    message: str         # human-readable explanation for the UI
+    courses: tuple = field(default_factory=tuple)
+    program_id: str = ""
+    year: int = 0
+    severity: str = "hard"   # "hard" => defines legality, "info" => advisory
 
     def to_dict(self) -> dict:
         return {
@@ -37,19 +33,11 @@ class Violation:
 
 @dataclass
 class ViolationReport:
-    """
-    Holds all violations found for a schedule.
+    # Hard violations define legality.
+    violations: list = field(default_factory=list)
 
-    violations:
-        Hard rule breaks. These decide if the schedule is legal.
-
-    collisions:
-        Informational elective collisions. These are useful for the UI, but they
-        do not always make the schedule illegal.
-    """
-
-    violations: List[Violation] = field(default_factory=list)
-    collisions: List[Violation] = field(default_factory=list)
+    # Informational elective collisions shown to the user.
+    collisions: list = field(default_factory=list)
 
     @property
     def is_legal(self) -> bool:
@@ -63,11 +51,11 @@ class ViolationReport:
 
     def components(self) -> list:
         """
-        Groups courses that are connected by hard violations.
+        Union-find over the courses that share a hard violation.
 
-        This is used by the cascade resolver. If two violations share a course,
-        they belong to the same component. The number of components is a safe
-        lower-bound estimate for how many independent problems remain.
+        Two courses are in the same component if they appear together in at least
+        one violation. Since one exam move touches one course, the number of
+        components is an admissible lower bound for the remaining repair moves.
         """
         parent = {}
 
@@ -101,7 +89,8 @@ class ViolationReport:
 
         groups = {}
         for course_id in parent:
-            groups.setdefault(find(course_id), set()).add(course_id)
+            root = find(course_id)
+            groups.setdefault(root, set()).add(course_id)
 
         return list(groups.values())
 
