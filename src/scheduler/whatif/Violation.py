@@ -1,6 +1,5 @@
 """
 Violation.py
-
 Value objects describing what is wrong with a hypothetical schedule.
 
 A Violation is one broken rule. A ViolationReport aggregates all of them and can
@@ -15,7 +14,7 @@ from dataclasses import dataclass, field
 class Violation:
     kind: str            # e.g. "baseline", "mandatory_spacing", "daily_capacity"
     message: str         # human-readable explanation for the UI
-    courses: tuple = field(default_factory=tuple)
+    courses: tuple       # tuple of course_ids involved in this violation
     program_id: str = ""
     year: int = 0
     severity: str = "hard"   # "hard" => defines legality, "info" => advisory
@@ -33,10 +32,9 @@ class Violation:
 
 @dataclass
 class ViolationReport:
-    # Hard violations define legality.
+    # Hard violations define legality (baseline rule + active hard constraints).
     violations: list = field(default_factory=list)
-
-    # Informational elective collisions shown to the user.
+    # Informational elective collisions ("which electives are now colliding").
     collisions: list = field(default_factory=list)
 
     @property
@@ -45,59 +43,43 @@ class ViolationReport:
 
     def involved_courses(self) -> set:
         out = set()
-        for violation in self.violations:
-            out.update(violation.courses)
+        for v in self.violations:
+            out.update(v.courses)
         return out
 
     def components(self) -> list:
         """
-        Union-find over the courses that share a hard violation.
-
-        Two courses are in the same component if they appear together in at least
-        one violation. Since one exam move touches one course, the number of
-        components is an admissible lower bound for the remaining repair moves.
+        Union-find over the courses that share a hard violation. Two courses are in
+        the same component if they appear together in some violation. A single exam
+        move touches exactly one course, so it can repair at most one component —
+        therefore the number of components is an admissible lower bound on the
+        remaining moves (the A* heuristic).
         """
         parent = {}
 
         def find(x):
             parent.setdefault(x, x)
             root = x
-
             while parent[root] != root:
                 root = parent[root]
-
-            while parent[x] != x:
+            while parent[x] != root:
                 parent[x], x = root, parent[x]
-
             return root
 
         def union(a, b):
             parent[find(a)] = find(b)
 
-        for violation in self.violations:
-            courses = list(violation.courses)
+        for v in self.violations:
+            cs = list(v.courses)
+            for c in cs[1:]:
+                union(cs[0], c)
 
-            if not courses:
-                continue
-
-            for course_id in courses:
-                parent.setdefault(course_id, course_id)
-
-            first = courses[0]
-            for course_id in courses[1:]:
-                union(first, course_id)
-
-        groups = {}
-        for course_id in parent:
-            root = find(course_id)
-            groups.setdefault(root, set()).add(course_id)
-
-        return list(groups.values())
+        roots = {find(c) for v in self.violations for c in v.courses}
+        return list(roots)
 
     def to_dict(self) -> dict:
         return {
             "legal": self.is_legal,
-            "is_legal": self.is_legal,
             "violations": [v.to_dict() for v in self.violations],
             "collisions": [c.to_dict() for c in self.collisions],
         }
