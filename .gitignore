@@ -7,4 +7,4 @@ __pycache__/
 
 # Temporary files
 *.tmp
-*.log
+*.logdata/.cache.pkl
