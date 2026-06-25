@@ -8,3 +8,6 @@ __pycache__/
 # Temporary files
 *.tmp
 *.logdata/.cache.pkl
+
+.cache.pkl
+
