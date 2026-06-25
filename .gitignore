@@ -4,11 +4,14 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Cache files
+.cache.pkl
+data/.cache.pkl
 
 # Temporary files
 *.tmp
-*.logdata/.cache.pkl
-
-.cache.pkl
-
-cpython-313.pyc
+*.log
