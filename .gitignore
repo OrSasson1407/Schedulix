@@ -8,3 +8,14 @@ __pycache__/
 # Temporary files
 *.tmp
 *.log
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest cache
+.pytest_cache/
+
+# Virtual environment
+venv/
+.env/
