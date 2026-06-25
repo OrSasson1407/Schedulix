@@ -27,9 +27,9 @@ if PROJECT_ROOT not in sys.path:
 from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
-from src.scheduler.ScheduleSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
-from src.scheduler.whatif import WhatIfEngine
 from src.models.ExamPeriod import ExamPeriod
+from src.scheduler.SchedulerSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
+from src.scheduler.whatif import WhatIfEngine
 from src.models.Constraints import SchedulingConstraints
 from src.ui.views import (
     render_page,
