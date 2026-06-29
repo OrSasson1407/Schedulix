@@ -261,7 +261,7 @@ class TestUIViews(unittest.TestCase):
         html = render_page(ctx)
 
         self.assertIn("Schedulix", html)
-        self.assertIn("Version 2.0", html)
+        self.assertIn("Version 34.0", html)
         self.assertIn("Schedulix logo", html)
         self.assertIn("/public/SchedulixLogo.jpeg", html)
 
