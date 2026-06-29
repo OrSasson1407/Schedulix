@@ -187,6 +187,42 @@ def _hidden_fields(fields: dict) -> str:
     )
 
 
+def _render_file_picker(picker_id: str) -> str:
+    """Custom English file picker (avoids browser-locale native input labels)."""
+    return f"""
+<div class="file-picker">
+  <input type="file" name="file" id="{_e(picker_id)}" accept=".txt" required class="file-picker-input"/>
+  <label for="{_e(picker_id)}" class="btn btn-secondary file-picker-btn">Choose file</label>
+  <span class="file-picker-name" data-placeholder="No file chosen">No file chosen</span>
+</div>"""
+
+
+def _render_toast_shell(flash: dict | None = None) -> str:
+    """Center-screen notification overlay (flash on load or empty shell for JS)."""
+    if flash and flash.get("msg"):
+        kind = flash.get("type", "ok")
+        card_cls = "ok" if kind == "ok" else "err"
+        title = "Success" if kind == "ok" else "Error"
+        icon = "✓" if kind == "ok" else "!"
+        overlay_cls = "toast-overlay show"
+        message = _e(flash["msg"])
+    else:
+        card_cls = ""
+        title = icon = message = ""
+        overlay_cls = "toast-overlay"
+    return f"""
+<div id="toast-overlay" class="{overlay_cls}">
+  <div id="toast-card" class="toast-card {card_cls}" role="alertdialog" aria-live="polite">
+    <div class="toast-icon" aria-hidden="true">{icon}</div>
+    <div class="toast-body">
+      <div class="toast-title">{title}</div>
+      <div class="toast-message">{message}</div>
+    </div>
+    <button type="button" class="toast-close" aria-label="Dismiss" onclick="schedulixHideToast()">×</button>
+  </div>
+</div>"""
+
+
 # ==========================================
 # MAIN LAYOUT RENDERING
 # ==========================================
@@ -200,14 +236,9 @@ def render_page(ctx: dict) -> str:
     # Determine the current screen (defaults to 'input')
     screen = ctx.get("screen", "input")
     
-    # Handle flash messages (toast notifications like "Saved successfully" or "Error")
+    # Handle flash messages (center-screen notification)
     flash = ctx.get("flash")
-    flash_html = ""
-    if flash and flash.get("msg"):
-        cls = "show " + ("ok" if flash.get("type") == "ok" else "err")
-        flash_html = f'<div id="toast" class="{cls}">{_e(flash["msg"])}</div>'
-    else:
-        flash_html = '<div id="toast"></div>'
+    flash_html = _render_toast_shell(flash if flash and flash.get("msg") else None)
 
     # Determine system status based on loaded files
     status_ok = ctx.get("courses_count", 0) > 0 and ctx.get("periods_count", 0) > 0
@@ -250,7 +281,7 @@ def render_page(ctx: dict) -> str:
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Schedulix v2.0</title>
+<title>Schedulix v34.0</title>
 <link rel="icon" href="{LOGO_URL}" type="image/jpeg"/>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="/static/style.css"/>
@@ -262,7 +293,7 @@ def render_page(ctx: dict) -> str:
       <img class="logo-img" src="{LOGO_URL}" alt="Schedulix logo" width="48" height="48"/>
       <div class="logo-text">
         <span class="logo-name">Schedulix</span>
-        <span class="logo-version">Version 2.0</span>
+        <span class="logo-version">Version 34.0</span>
       </div>
     </div>
     {nav}
@@ -288,15 +319,39 @@ def render_page(ctx: dict) -> str:
 
 <script>
 (function () {{
-  // Helper to show popup toast notifications
-  function showToast(msg, type) {{
-    var el = document.getElementById("toast");
-    if (!el) return;
-    el.textContent = msg;
-    el.className = "show " + (type || "ok");
-    clearTimeout(el._t);
-    el._t = setTimeout(function () {{ el.className = ""; }}, 2800);
+  // Center-screen notification toast
+  function hideToast() {{
+    var overlay = document.getElementById("toast-overlay");
+    if (overlay) overlay.classList.remove("show");
   }}
+
+  function showToast(msg, type) {{
+    var overlay = document.getElementById("toast-overlay");
+    var el = document.getElementById("toast-card");
+    if (!overlay || !el) return;
+    type = type || "ok";
+    var isOk = type === "ok";
+    el.className = "toast-card " + (isOk ? "ok" : "err");
+    var iconEl = el.querySelector(".toast-icon");
+    var titleEl = el.querySelector(".toast-title");
+    var msgEl = el.querySelector(".toast-message");
+    if (iconEl) iconEl.textContent = isOk ? "✓" : "!";
+    if (titleEl) titleEl.textContent = isOk ? "Success" : "Error";
+    if (msgEl) msgEl.textContent = msg;
+    overlay.classList.add("show");
+    clearTimeout(el._t);
+    el._t = setTimeout(hideToast, 4200);
+  }}
+  window.schedulixShowToast = showToast;
+  window.schedulixHideToast = hideToast;
+
+  (function initFlashToast() {{
+    var overlay = document.getElementById("toast-overlay");
+    if (overlay && overlay.classList.contains("show")) {{
+      var el = document.getElementById("toast-card");
+      if (el) el._t = setTimeout(hideToast, 4200);
+    }}
+  }})();
 
   // Wrapper for fetch requests to backend forms
   function schedulixFetch(form) {{
@@ -309,74 +364,232 @@ def render_page(ctx: dict) -> str:
     }});
   }}
 
-  // Intercept program selection toggles (checkboxes/cards)
-  document.querySelectorAll("form.program-toggle-form").forEach(function (form) {{
-    form.addEventListener("submit", function (e) {{
-      e.preventDefault();
-      schedulixFetch(form)
-        .then(function (res) {{
-          if (!res.data.ok) {{
-            showToast(res.data.error || "Could not update selection", "err");
-            return;
-          }}
-          // Update the selected counter text dynamically
-          var countEl = document.getElementById("sel-count");
-          if (countEl) countEl.textContent = res.data.count;
-          
-          // Visually toggle the card state
-          var card = document.querySelector('.program-card[data-prog-id="' + res.data.prog_id + '"]');
-          if (card) {{
-            card.classList.toggle("selected", res.data.is_selected);
-            var mark = card.querySelector(".checkmark");
-            if (mark) mark.textContent = res.data.is_selected ? "\\u2713" : "";
-          }}
-        }})
-        .catch(function () {{
-          showToast("Could not update selection", "err");
-        }});
-    }});
-  }});
+  // ── Scroll position: keep .content scroll across reloads ──
+  function scrollStorageKey() {{
+    var u = new URL(window.location.href);
+    u.searchParams.delete("scroll");
+    u.searchParams.delete("aleph_page");
+    u.searchParams.delete("bet_page");
+    u.hash = "";
+    return "schedulix:scroll:" + u.pathname + u.search;
+  }}
 
-  // Intercept the "Generate Schedules" form
+  function saveContentScroll() {{
+    var c = document.querySelector(".content");
+    if (!c) return;
+    try {{ sessionStorage.setItem(scrollStorageKey(), String(c.scrollTop)); }} catch (e) {{}}
+  }}
+
+  function restoreContentScroll(serverY) {{
+    var c = document.querySelector(".content");
+    if (!c) return;
+    var y = serverY > 0 ? serverY : 0;
+    if (y <= 0) {{
+      try {{ y = parseInt(sessionStorage.getItem(scrollStorageKey()), 10) || 0; }} catch (e) {{}}
+    }}
+    if (y <= 0) return;
+    function apply() {{ c.scrollTop = y; }}
+    apply();
+    requestAnimationFrame(apply);
+    setTimeout(apply, 50);
+    setTimeout(apply, 200);
+  }}
+
+  function injectScrollField(form) {{
+    if (!form || form.classList.contains("program-toggle-form") ||
+        form.classList.contains("generate-form") ||
+        form.classList.contains("file-upload-form") ||
+        form.classList.contains("history-restore-form") ||
+        form.classList.contains("sort-form") ||
+        form.classList.contains("whatif-undo-form")) return;
+    var c = document.querySelector(".content");
+    if (!c) return;
+    var inp = form.querySelector('input[name="scroll_y"]');
+    if (!inp) {{
+      inp = document.createElement("input");
+      inp.type = "hidden";
+      inp.name = "scroll_y";
+      form.appendChild(inp);
+    }}
+    inp.value = c.scrollTop;
+    saveContentScroll();
+  }}
+
+  var scrollSaveTimer = null;
+  var contentEl = document.querySelector(".content");
+  if (contentEl) {{
+    contentEl.addEventListener("scroll", function () {{
+      clearTimeout(scrollSaveTimer);
+      scrollSaveTimer = setTimeout(saveContentScroll, 120);
+    }}, {{ passive: true }});
+  }}
+  window.addEventListener("beforeunload", saveContentScroll);
+  document.addEventListener("click", function (e) {{
+    var a = e.target.closest("a[href]");
+    if (!a || a.target === "_blank") return;
+    try {{
+      var dest = new URL(a.href, window.location.href);
+      if (dest.origin === window.location.origin) saveContentScroll();
+    }} catch (err) {{}}
+  }}, true);
+  document.addEventListener("submit", function (e) {{
+    injectScrollField(e.target);
+  }}, true);
+
+  function applyOutputLive(data) {{
+    if (data.output_top_bar_html) {{
+      var top = document.getElementById("output-top-bar");
+      if (top) top.innerHTML = data.output_top_bar_html;
+    }}
+    if (data.output_body_html) {{
+      var body = document.getElementById("output-body");
+      if (body) body.innerHTML = data.output_body_html;
+    }}
+    var exportBtn = document.querySelector(".export-bar .btn-primary");
+    if (exportBtn) exportBtn.removeAttribute("disabled");
+  }}
+  window.schedulixApplyOutputLive = applyOutputLive;
+
+  // Intercept program selection toggles (checkboxes/cards)
+  function bindProgramToggles() {{
+    document.querySelectorAll("form.program-toggle-form").forEach(function (form) {{
+      if (form._schedulixBound) return;
+      form._schedulixBound = true;
+      form.addEventListener("submit", function (e) {{
+        e.preventDefault();
+        schedulixFetch(form)
+          .then(function (res) {{
+            if (!res.data.ok) {{
+              showToast(res.data.error || "Could not update selection", "err");
+              return;
+            }}
+            var countEl = document.getElementById("sel-count");
+            if (countEl) countEl.textContent = res.data.count;
+            var card = document.querySelector('.program-card[data-prog-id="' + res.data.prog_id + '"]');
+            if (card) {{
+              card.classList.toggle("selected", res.data.is_selected);
+              var mark = card.querySelector(".checkmark");
+              if (mark) mark.textContent = res.data.is_selected ? "\\u2713" : "";
+            }}
+          }})
+          .catch(function () {{
+            showToast("Could not update selection", "err");
+          }});
+      }});
+    }});
+  }}
+  bindProgramToggles();
+
+  // Custom file pickers — English labels instead of browser locale
+  function bindFilePickers(root) {{
+    (root || document).querySelectorAll(".file-picker-input").forEach(function (input) {{
+      if (input._schedulixBound) return;
+      input._schedulixBound = true;
+      var nameEl = input.parentElement.querySelector(".file-picker-name");
+      var placeholder = (nameEl && nameEl.dataset.placeholder) || "No file chosen";
+      input.addEventListener("change", function () {{
+        if (!nameEl) return;
+        nameEl.textContent =
+          input.files && input.files[0] ? input.files[0].name : placeholder;
+      }});
+    }});
+  }}
+  bindFilePickers();
+
+  // Intercept the "Generate Schedules" form — start job and go to Output immediately
   document.querySelectorAll("form.generate-form").forEach(function (form) {{
     form.addEventListener("submit", function (e) {{
       e.preventDefault();
       var btn = form.querySelector("#generateBtn");
-      var label = btn ? btn.textContent : "";
       if (btn) {{
-        btn.disabled = true; // Disable button to prevent double-clicks
-        btn.textContent = "Generating…"; // Show loading state
+        btn.disabled = true;
+        btn.textContent = "Starting…";
       }}
       schedulixFetch(form)
         .then(function (res) {{
           if (!res.data.ok) {{
             showToast(res.data.error || "Generate failed", "err");
+            if (btn) {{ btn.disabled = false; btn.textContent = "▶ Generate"; }}
             return;
           }}
-          // Update the UI with generation results
-          var resultEl = document.getElementById("gen-result");
-          if (resultEl) resultEl.textContent = res.data.gen_result || "";
-          var historyEl = document.getElementById("gen-history-root");
-          if (historyEl) historyEl.innerHTML = res.data.history_html || "";
-          var outLink = document.getElementById("view-output-link");
-          if (outLink) outLink.style.display = res.data.gen_result ? "inline-flex" : "none";
-          if (res.data.flash && res.data.flash.msg) {{
-            showToast(res.data.flash.msg, res.data.flash.type || "ok");
-          }}
-          // Re-bind click events for newly injected HTML
-          document.querySelectorAll("form.history-restore-form").forEach(bindHistoryRestore);
-          // Auto-navigate to output page when generation is done
-          window.location.href = "/?screen=output";
+          window.location.href = "/?screen=output&generating=1";
         }})
         .catch(function () {{
           showToast("Generate failed", "err");
-        }})
-        .finally(function () {{
-          if (btn) {{
-            btn.disabled = false;
-            btn.textContent = label;
-          }}
+          if (btn) {{ btn.disabled = false; btn.textContent = "▶ Generate"; }}
         }});
+    }});
+  }});
+
+  // Intercept file upload forms — update status without full page reload
+  document.querySelectorAll("form.file-upload-form").forEach(function (form) {{
+    form.addEventListener("submit", function (e) {{
+      e.preventDefault();
+      var fileInput = form.querySelector(".file-picker-input");
+      if (!fileInput || !fileInput.files || !fileInput.files.length) {{
+        showToast("Choose a file first", "err");
+        return;
+      }}
+      var historyEl = document.getElementById("gen-history-root");
+      var resultEl = document.getElementById("gen-result");
+      var outLink = document.getElementById("view-output-link");
+      var hadGeneratedData =
+        (historyEl && historyEl.innerHTML.trim()) ||
+        (resultEl && resultEl.textContent.trim()) ||
+        (outLink && outLink.style.display !== "none");
+      if (hadGeneratedData) {{
+        var ok = window.confirm(
+          "Uploading a new file will delete generation history, all generated schedules, " +
+          "and manual calendar edits. Continue?"
+        );
+        if (!ok) return;
+      }}
+      var statusEl = form.querySelector(".file-status");
+      var btn = form.querySelector("button[type=submit]");
+      if (btn) btn.disabled = true;
+      fetch(form.action, {{
+        method: "POST",
+        body: new FormData(form),
+        headers: {{ "X-Requested-With": "Schedulix" }},
+      }})
+        .then(function (r) {{ return r.json().then(function (data) {{ return {{ ok: r.ok, data: data }}; }}); }})
+        .then(function (res) {{
+          if (!res.data.ok) {{
+            showToast(res.data.error || "Upload failed", "err");
+            return;
+          }}
+          if (statusEl) {{
+            statusEl.textContent = res.data.courses_status || res.data.periods_status || "";
+            statusEl.className = "file-status ok";
+          }}
+          if (res.data.program_grid_html) {{
+            var grid = document.querySelector(".program-grid");
+            if (grid) grid.innerHTML = res.data.program_grid_html;
+            bindProgramToggles();
+          }}
+          if (typeof res.data.sel_count === "number") {{
+            var countEl = document.getElementById("sel-count");
+            if (countEl) countEl.textContent = res.data.sel_count;
+          }}
+          if (res.data.history_html !== undefined) {{
+            var historyEl = document.getElementById("gen-history-root");
+            if (historyEl) historyEl.innerHTML = res.data.history_html;
+          }}
+          if (res.data.gen_result !== undefined) {{
+            var resultEl = document.getElementById("gen-result");
+            if (resultEl) resultEl.textContent = res.data.gen_result;
+          }}
+          var outLink = document.getElementById("view-output-link");
+          if (outLink) outLink.style.display = "none";
+          if (res.data.flash && res.data.flash.msg) {{
+            showToast(res.data.flash.msg, res.data.flash.type || "ok");
+          }}
+          form.reset();
+          var pickerName = form.querySelector(".file-picker-name");
+          if (pickerName) pickerName.textContent = pickerName.dataset.placeholder || "No file chosen";
+        }})
+        .catch(function () {{ showToast("Upload failed", "err"); }})
+        .finally(function () {{ if (btn) btn.disabled = false; }});
     }});
   }});
 
@@ -428,18 +641,89 @@ def render_page(ctx: dict) -> str:
   }}
   document.querySelectorAll("form.history-restore-form").forEach(bindHistoryRestore);
 
-  // Restore scroll position logic
+  // Output screen — poll while generation runs; update calendars and counts live
+  (function outputGenerationPoll() {{
+    var params = new URLSearchParams(window.location.search);
+    if (params.get("screen") !== "output") return;
+    var genBar = document.getElementById("gen-progress-bar");
+    var shouldPoll = params.get("generating") === "1" ||
+      (genBar && genBar.getAttribute("data-active") === "1");
+    if (!shouldPoll) return;
+
+    function applyLiveOutput(data) {{
+      if (data.gen_progress_html) {{
+        var bar = document.getElementById("gen-progress-bar");
+        if (bar) bar.outerHTML = data.gen_progress_html;
+      }}
+      applyOutputLive(data);
+      var exportBtn = document.querySelector(".export-bar .btn-primary");
+      if (exportBtn && (data.aleph_count || data.bet_count)) {{
+        exportBtn.removeAttribute("disabled");
+      }}
+    }}
+
+    function poll() {{
+      fetch("/generate/status", {{ headers: {{ "X-Requested-With": "Schedulix" }} }})
+        .then(function (r) {{ return r.json(); }})
+        .then(function (data) {{
+          applyLiveOutput(data);
+          if (data.running) {{
+            setTimeout(poll, 300);
+            return;
+          }}
+          if (params.get("generating") === "1") {{
+            var clean = new URL(window.location.href);
+            clean.searchParams.delete("generating");
+            window.history.replaceState({{}}, "", clean.pathname + clean.search);
+          }}
+          if (data.error) {{
+            showToast(data.error, "err");
+          }} else if (data.flash && data.flash.msg) {{
+            showToast(data.flash.msg, data.flash.type || "ok");
+          }}
+        }})
+        .catch(function () {{ setTimeout(poll, 500); }});
+    }}
+    poll();
+  }})();
+
+  // Restore scroll position after reload
+  restoreContentScroll({scroll_y});
   var content = document.querySelector(".content");
-  if (!content) return;
-  var scrollY = {scroll_y};
-  if (scrollY > 0) {{
-    content.scrollTop = scrollY;
-    return;
+  if (content && !{scroll_y}) {{
+    var id = location.hash;
+    if (id) {{
+      var el = document.querySelector(id);
+      if (el) el.scrollIntoView({{ block: "start", behavior: "instant" }});
+    }}
   }}
-  var id = location.hash;
-  if (!id) return;
-  var el = document.querySelector(id);
-  if (el) el.scrollIntoView({{ block: "start", behavior: "instant" }});
+
+  // Sort + undo on Output — AJAX so scroll is not lost
+  document.querySelectorAll("form.sort-form").forEach(function (form) {{
+    form.addEventListener("submit", function (e) {{
+      e.preventDefault();
+      schedulixFetch(form).then(function (res) {{
+        if (!res.data.ok) {{ showToast(res.data.error || "Sort failed", "err"); return; }}
+        applyOutputLive(res.data);
+        if (res.data.flash && res.data.flash.msg) showToast(res.data.flash.msg, res.data.flash.type || "ok");
+      }}).catch(function () {{ showToast("Sort failed", "err"); }});
+    }});
+  }});
+  document.querySelectorAll("form.whatif-undo-form").forEach(function (form) {{
+    form.addEventListener("submit", function (e) {{
+      e.preventDefault();
+      schedulixFetch(form).then(function (res) {{
+        if (!res.data.ok) {{ showToast(res.data.error || "Nothing to undo", "err"); return; }}
+        applyOutputLive(res.data);
+        var btn = form.querySelector("button");
+        if (btn && typeof res.data.remaining === "number") {{
+          btn.disabled = res.data.remaining <= 0;
+          btn.textContent = res.data.remaining > 0 ? "\u21b6 Undo (" + res.data.remaining + ")" : "\u21b6 Undo";
+        }}
+        if (res.data.flash && res.data.flash.msg) showToast(res.data.flash.msg, res.data.flash.type || "ok");
+      }}).catch(function () {{ showToast("Undo failed", "err"); }});
+    }});
+  }});
 }})();
   // Course detail modal
   (function() {{
@@ -490,22 +774,77 @@ def render_page(ctx: dict) -> str:
   // ===== What-If / Domino-Effect drag & drop =====
   var wifDrag_ = null;     // the exam currently being dragged
   var wifPending_ = null;  // the move awaiting Apply
+  var wifHoverCell_ = null;
+  var wifCheckTimer_ = null;
+  var wifCheckCache_ = {{}};
+  var wifCheckSeq_ = 0;
+
+  function wifClearDropHints() {{
+    document.querySelectorAll(
+      '.out-cal-day.wif-drop-ok, .out-cal-day.wif-drop-bad, .out-cal-day.wif-drop-pending'
+    ).forEach(function (el) {{
+      el.classList.remove('wif-drop-ok', 'wif-drop-bad', 'wif-drop-pending');
+    }});
+  }}
+
+  function wifDragEnd() {{
+    wifDrag_ = null;
+    wifHoverCell_ = null;
+    wifCheckCache_ = {{}};
+    clearTimeout(wifCheckTimer_);
+    wifClearDropHints();
+  }}
 
   function wifToast(msg, type) {{
-    var el = document.getElementById('toast');
-    if (!el) return;
-    el.textContent = msg;
-    el.className = 'show ' + (type || 'ok');
-    clearTimeout(el._t);
-    el._t = setTimeout(function () {{ el.className = ''; }}, 2800);
+    if (window.schedulixShowToast) window.schedulixShowToast(msg, type);
   }}
 
   function wifDrag(e) {{
     var d = e.target.dataset;
     if (d.locked === '1') {{ e.preventDefault(); wifToast('Exam is locked', 'err'); return; }}
     wifDrag_ = {{ course_id: d.courseId, moed: d.moed, from_date: d.date }};
+    wifCheckCache_ = {{}};
     try {{ e.dataTransfer.setData('text/plain', d.courseId); }} catch (err) {{}}
     e.dataTransfer.effectAllowed = 'move';
+  }}
+
+  function wifDragEndEvent() {{ wifDragEnd(); }}
+
+  function wifInstantDropClass(cell) {{
+    if (!wifDrag_) return null;
+    if (cell.moed !== wifDrag_.moed) return 'bad';
+    if (cell.date === wifDrag_.from_date) return null;
+    return 'pending';
+  }}
+
+  function wifValidateDropCell(el, cell) {{
+    var cacheKey = wifDrag_.course_id + '|' + wifDrag_.from_date + '|' + cell.date;
+    if (wifCheckCache_[cacheKey] !== undefined) {{
+      el.classList.remove('wif-drop-pending');
+      el.classList.add(wifCheckCache_[cacheKey] ? 'wif-drop-ok' : 'wif-drop-bad');
+      return;
+    }}
+    clearTimeout(wifCheckTimer_);
+    var seq = ++wifCheckSeq_;
+    wifCheckTimer_ = setTimeout(function () {{
+      if (wifHoverCell_ !== el || !wifDrag_) return;
+      wifPost('/whatif/resolve', {{
+        moed: wifDrag_.moed,
+        course_id: wifDrag_.course_id,
+        new_date: cell.date,
+      }}).then(function (data) {{
+        if (wifHoverCell_ !== el || seq !== wifCheckSeq_) return;
+        var ok = !!(data.ok && data.solved);
+        wifCheckCache_[cacheKey] = ok;
+        el.classList.remove('wif-drop-pending');
+        el.classList.add(ok ? 'wif-drop-ok' : 'wif-drop-bad');
+      }}).catch(function () {{
+        if (wifHoverCell_ !== el) return;
+        wifCheckCache_[cacheKey] = false;
+        el.classList.remove('wif-drop-pending');
+        el.classList.add('wif-drop-bad');
+      }});
+    }}, 100);
   }}
 
   function wifToggleLock(e, btn) {{
@@ -524,11 +863,33 @@ def render_page(ctx: dict) -> str:
 
   function wifOver(e) {{
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    e.currentTarget.classList.add('wif-drop-hover');
+    if (!wifDrag_) return;
+    var el = e.currentTarget;
+    var cell = el.dataset;
+    e.dataTransfer.dropEffect = cell.moed === wifDrag_.moed ? 'move' : 'none';
+
+    if (wifHoverCell_ === el) return;
+    wifHoverCell_ = el;
+    wifClearDropHints();
+
+    var instant = wifInstantDropClass(cell);
+    if (instant === 'bad') {{
+      el.classList.add('wif-drop-bad');
+      return;
+    }}
+    if (instant === null) return;
+
+    el.classList.add('wif-drop-pending');
+    wifValidateDropCell(el, cell);
   }}
 
-  function wifLeave(e) {{ e.currentTarget.classList.remove('wif-drop-hover'); }}
+  function wifLeave(e) {{
+    var el = e.currentTarget;
+    var rel = e.relatedTarget;
+    if (rel && el.contains(rel)) return;
+    el.classList.remove('wif-drop-ok', 'wif-drop-bad', 'wif-drop-pending');
+    if (wifHoverCell_ === el) wifHoverCell_ = null;
+  }}
 
   function wifPost(url, params) {{
     return fetch(url, {{
@@ -543,7 +904,8 @@ def render_page(ctx: dict) -> str:
 
   function wifDrop(e) {{
     e.preventDefault();
-    e.currentTarget.classList.remove('wif-drop-hover');
+    wifClearDropHints();
+    wifHoverCell_ = null;
     var cell = e.currentTarget.dataset;
     if (!wifDrag_) return;
     if (cell.moed !== wifDrag_.moed) {{ wifToast('Drag within the same moed', 'err'); return; }}
@@ -612,7 +974,15 @@ def render_page(ctx: dict) -> str:
     if (!wifPending_) return;
     wifPost('/whatif/apply', wifPending_).then(function (data) {{
       if (!data.ok) {{ wifToast(data.error || 'Apply failed', 'err'); return; }}
-      window.location.href = '/?screen=output';
+      wifHide();
+      wifPending_ = null;
+      if (window.schedulixApplyOutputLive) window.schedulixApplyOutputLive(data);
+      var undoBtn = document.querySelector('form.whatif-undo-form button');
+      if (undoBtn) {{
+        undoBtn.disabled = false;
+        undoBtn.textContent = '\u21b6 Undo';
+      }}
+      if (data.flash && data.flash.msg) wifToast(data.flash.msg, data.flash.type || 'ok');
     }}).catch(function () {{ wifToast('Apply failed', 'err'); }});
   }}
 
@@ -688,6 +1058,11 @@ def _render_input(ctx: dict) -> str:
 <div class="screen active">
   <div class="card" id="file-loading">
     <div class="card-title">📂 File Loading</div>
+    <p class="file-upload-notice">
+      Uploading a <strong>courses</strong> or <strong>dates</strong> file (overwrite or append)
+      clears <strong>generation history</strong>, generated schedules, and any manual calendar edits.
+      You will need to select programs and click Generate again.
+    </p>
     
     <form method="post" action="/set_mode" style="margin-bottom:14px;">
       <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Load Mode</div>
@@ -697,18 +1072,18 @@ def _render_input(ctx: dict) -> str:
       </div>
     </form>
     
-    <form method="post" action="/upload/courses" enctype="multipart/form-data" class="file-row">
+    <form method="post" action="/upload/courses" enctype="multipart/form-data" class="file-row file-upload-form">
       <input type="hidden" name="mode" value="{_e(file_mode)}"/>
       <span class="file-label">Courses File</span>
-      <input type="file" name="file" accept=".txt" required style="max-width:220px; font-size:12px;"/>
+      {_render_file_picker("courses-file-input")}
       <button type="submit" class="btn btn-secondary">📂 Upload</button>
       <span class="file-status {cs_cls}">{_e(cs)}</span>
     </form>
     
-    <form method="post" action="/upload/periods" enctype="multipart/form-data" class="file-row">
+    <form method="post" action="/upload/periods" enctype="multipart/form-data" class="file-row file-upload-form">
       <input type="hidden" name="mode" value="{_e(file_mode)}"/>
       <span class="file-label">Dates File</span>
-      <input type="file" name="file" accept=".txt" required style="max-width:220px; font-size:12px;"/>
+      {_render_file_picker("periods-file-input")}
       <button type="submit" class="btn btn-secondary">📂 Upload</button>
       <span class="file-status {ps_cls}">{_e(ps)}</span>
     </form>
@@ -725,8 +1100,11 @@ def _render_input(ctx: dict) -> str:
   <div class="card" id="generate-schedules">
     <div class="card-title">⚙️ Generate Schedules</div>
     <p style="color:var(--muted); font-size:13px; margin-bottom:14px;">
-      Runs the backtracking scheduler on Moed Aleph <strong style="color:var(--aleph-color)">✦</strong>
-      and Moed Bet <strong style="color:var(--bet-color)">✦</strong> independently.
+      <strong>Generate</strong> runs the backtracking scheduler on your loaded courses and exam dates.
+      It finds every valid timetable for the selected programs (up to 5), separately for
+      Moed Aleph <strong style="color:var(--aleph-color)">✦</strong> and Moed Bet
+      <strong style="color:var(--bet-color)">✦</strong>.
+      Results appear live on the Output screen. Change programs, calendar dates, or settings first — then click Generate again.
     </p>
     <form method="post" action="/generate" class="generate-form" style="display:inline;">
       <button type="submit" class="btn btn-green" id="generateBtn">▶ Generate</button>
@@ -847,6 +1225,11 @@ def format_generate_result(aleph_count: int, bet_count: int) -> str:
     return ""
 
 
+def render_program_grid_html(ctx: dict) -> str:
+    """Render only the program grid (for AJAX refresh after file upload)."""
+    return _render_program_grid(ctx)
+
+
 def render_gen_history_html(history: list) -> str:
     """Wrapper function to render the history list outside the main flow (used by JS)."""
     return _render_gen_history({"gen_history": history})
@@ -864,8 +1247,8 @@ def _render_gen_history(ctx: dict) -> str:
     items = []
     # Loop through the history backwards (newest first)
     for i, h in enumerate(reversed(history)):
-        idx = len(history) - 1 - i
-        is_current = idx == len(history) - 1
+        idx = h.get("_index", len(history) - 1 - i)
+        is_current = i == 0
         ts = h.get("ts")
         time_str = ts.strftime("%H:%M") if ts else ""
         date_str = ts.strftime("%b %d") if ts else ""
@@ -902,6 +1285,10 @@ def _render_gen_history(ctx: dict) -> str:
 <div class="gen-history-wrap" style="display:block; margin-top:14px;">
   <hr class="divider"/>
   <div class="gen-history-title">📋 Generation history (last 2)</div>
+  <p style="color:var(--muted); font-size:11px; margin:6px 0 10px;">
+    Restore rolls back programs, calendar overrides, and schedules from a prior run.
+    Only entries matching the currently loaded files are shown.
+  </p>
   <div class="gen-history-list">{"".join(items)}</div>
 </div>"""
 
@@ -1085,14 +1472,14 @@ def _render_calendar(ctx: dict) -> str:
     <div class="moed-panel aleph">
       <div class="moed-header">
         <span class="moed-badge aleph">MOED ALEPH</span>
-        <span style="font-size:12px; color:var(--muted);">מועד א׳</span>
+        <span style="font-size:12px; color:var(--muted);">Aleph session</span>
       </div>
       {aleph_panel}
     </div>
     <div class="moed-panel bet">
       <div class="moed-header">
         <span class="moed-badge bet">MOED BET</span>
-        <span style="font-size:12px; color:var(--muted);">מועד ב׳</span>
+        <span style="font-size:12px; color:var(--muted);">Bet session</span>
       </div>
       {bet_panel}
     </div>
@@ -1283,7 +1670,7 @@ def _render_sort_panel(ctx: dict) -> str:
     Choose an ordered set of criteria. Each layer sorts in <strong>descending</strong> order
     and re-orders the existing results instantly (no re-generation).
   </p>
-  <form method="post" action="/sort">
+  <form method="post" action="/sort" class="sort-form">
     <input type="hidden" name="semester_view" value="{_e(active_sem)}"/>
     <div class="sort-slots">{"".join(slots)}</div>
     <div style="display:flex; align-items:center; gap:14px; margin-top:14px; flex-wrap:wrap;">
@@ -1292,6 +1679,71 @@ def _render_sort_panel(ctx: dict) -> str:
     </div>
   </form>
 </div>"""
+
+
+def _render_gen_progress_bar(ctx: dict) -> str:
+    """Banner shown on Output while schedules are still being generated."""
+    active = ctx.get("gen_running", False)
+    style = "" if active else ' style="display:none;"'
+    aleph = ctx.get("aleph_total", 0)
+    bet = ctx.get("bet_total", 0)
+    return (
+        f'<div id="gen-progress-bar" class="gen-progress-bar" data-active="{"1" if active else "0"}"{style}>'
+        f'⏳ Generating… <span id="live-aleph-count">{aleph}</span> Aleph · '
+        f'<span id="live-bet-count">{bet}</span> Bet schedules found so far'
+        f'</div>'
+    )
+
+
+def _render_output_body(ctx: dict) -> str:
+    schedule = ctx.get("schedule")
+    if schedule and (schedule.get("aleph_entries") or schedule.get("bet_entries")):
+        return (
+            '<div class="dual-output-layout">'
+            '<div class="output-panel">'
+            '<div class="output-panel-header aleph">'
+            '<span>♦ MOED ALEPH</span>'
+            f'<span style="font-size:10px;color:rgba(79,142,247,.6);">{len(schedule.get("aleph_entries", []))} exams</span>'
+            '</div>'
+            + _render_result_calendar(schedule.get("aleph_entries", []), "aleph")
+            + '</div>'
+            '<div class="output-panel">'
+            '<div class="output-panel-header bet">'
+            '<span>♦ MOED BET</span>'
+            f'<span style="font-size:10px;color:rgba(232,131,79,.6);">{len(schedule.get("bet_entries", []))} exams</span>'
+            '</div>'
+            + _render_result_calendar(schedule.get("bet_entries", []), "bet")
+            + '</div></div>'
+        )
+    if ctx.get("gen_running"):
+        return (
+            '<div class="empty-state">'
+            '<div class="icon">⏳</div>'
+            'Generating schedules… calendars will appear here as results are found.'
+            '</div>'
+        )
+    return (
+        '<div class="empty-state">'
+        '<div class="icon">📭</div>'
+        'No schedules yet — generate from the Input screen.'
+        '</div>'
+    )
+
+
+def render_output_live(ctx: dict) -> dict:
+    """Return HTML fragments for live Output updates during background generation."""
+    aleph_page = ctx.get("aleph_page", 0)
+    bet_page = ctx.get("bet_page", 0)
+    aleph_total = ctx.get("aleph_total", 0)
+    bet_total = ctx.get("bet_total", 0)
+    return {
+        "gen_progress_html": _render_gen_progress_bar(ctx),
+        "output_top_bar_html": (
+            _render_output_toolbar("aleph", aleph_page, aleph_total, ctx)
+            + _render_output_toolbar("bet", bet_page, bet_total, ctx)
+        ),
+        "output_body_html": _render_output_body(ctx),
+    }
 
 
 def _render_output(ctx: dict) -> str:
@@ -1327,27 +1779,8 @@ def _render_output(ctx: dict) -> str:
     aleph_toolbar = _render_output_toolbar("aleph", aleph_page, aleph_total, ctx)
     bet_toolbar   = _render_output_toolbar("bet",   bet_page,   bet_total,   ctx)
 
-    schedule = ctx.get("schedule")
-    if schedule and (schedule.get("aleph_entries") or schedule.get("bet_entries")):
-        out_body = (
-            '<div class="dual-output-layout">' +
-            '<div class="output-panel">' +
-            '<div class="output-panel-header aleph">' +
-            '<span>♦ MOED ALEPH</span>' +
-            f'<span style="font-size:10px;color:rgba(79,142,247,.6);">{len(schedule.get("aleph_entries",[]))} exams</span>' +
-            '</div>' +
-            _render_result_calendar(schedule.get("aleph_entries", []), "aleph") +
-            '</div>' +
-            '<div class="output-panel">' +
-            '<div class="output-panel-header bet">' +
-            '<span>♦ MOED BET</span>' +
-            f'<span style="font-size:10px;color:rgba(232,131,79,.6);">{len(schedule.get("bet_entries",[]))} exams</span>' +
-            '</div>' +
-            _render_result_calendar(schedule.get("bet_entries", []), "bet") +
-            '</div></div>'
-        )
-    else:
-        out_body = '<div class="empty-state"><div class="icon">📭</div>No schedules yet — generate from the Input screen.</div>'
+    out_body = _render_output_body(ctx)
+    gen_progress = _render_gen_progress_bar(ctx)
 
     export_disabled = "" if (aleph_total or bet_total) else " disabled"
     export_href = f"/export"
@@ -1358,7 +1791,7 @@ def _render_output(ctx: dict) -> str:
     undo_disabled = "" if can_undo else " disabled"
     undo_label = "↶ Undo" + (f" ({edit_count})" if edit_count else "")
     undo_btn = (
-        '<form method="post" action="/whatif/undo" style="display:inline;">'
+        '<form method="post" action="/whatif/undo" class="whatif-undo-form" style="display:inline;">'
         f'<input type="hidden" name="semester_view" value="{_e(active_sem)}"/>'
         f'<button type="submit" class="btn btn-secondary"{undo_disabled}>{undo_label}</button>'
         '</form>'
@@ -1370,13 +1803,14 @@ def _render_output(ctx: dict) -> str:
         '<div class="screen active">' +
         sem_bar +
         sort_panel +
-        '<div class="output-top-bar">' + aleph_toolbar + bet_toolbar + '</div>' +
+        gen_progress +
+        '<div class="output-top-bar" id="output-top-bar">' + aleph_toolbar + bet_toolbar + '</div>' +
         '<div class="export-bar">' +
         f'<a class="btn btn-primary" href="{export_href}"{export_disabled}>{export_label}</a>' +
         undo_btn +
         '<span class="wif-hint">💡 Drag any exam to another day to preview the domino effect · 🔒 lock to freeze an exam</span>' +
         '</div>' +
-        out_body +
+        f'<div id="output-body">{out_body}</div>' +
         '</div>'
     )
 
@@ -1542,7 +1976,8 @@ def _render_result_calendar(entries: list, moed: str) -> str:
                 lock_icon = "🔒" if is_locked else "🔓"
                 exam_html += (
                     f'<div class="exam-block {req} {moed}{locked_cls}" title="{title}" '
-                    f'draggable="{"false" if is_locked else "true"}" ondragstart="wifDrag(event)" '
+                    f'draggable="{"false" if is_locked else "true"}" '
+                    f'ondragstart="wifDrag(event)" ondragend="wifDragEndEvent()" '
                     f'data-course-id="{_e(e["course_id"])}" '
                     f'data-course-name="{_e(e["course_name"])}" '
                     f'data-instructor="{_e(e["instructor"])}" '

@@ -11,6 +11,7 @@ import os
 import sys
 import pickle
 import hashlib
+import json
 import threading
 import copy
 import time
@@ -27,9 +28,10 @@ if PROJECT_ROOT not in sys.path:
 from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
-from src.scheduler.ScheduleSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
+from src.scheduler.SchedulerSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
 from src.scheduler.whatif import WhatIfEngine
 from src.models.ExamPeriod import ExamPeriod
+from src.models.Schedule import Schedule
 from src.models.Constraints import SchedulingConstraints
 from src.ui.views import (
     render_page,
@@ -37,6 +39,8 @@ from src.ui.views import (
     HOLIDAY_PRESETS,
     format_generate_result,
     render_gen_history_html,
+    render_program_grid_html,
+    render_output_live,
 )
 
 app = Flask(__name__, static_folder="static")
@@ -70,6 +74,13 @@ state = {
     "custom_events": [],
     # Undo stack of manual post-generation edits (drag-and-drop applies).
     "edit_history": [],
+    # Background generation job status (updated incrementally while running).
+    "gen_job": {
+        "running": False,
+        "done": False,
+        "timed_out": False,
+        "error": None,
+    },
 }
 
 CACHE_PATH = os.path.join(PROJECT_ROOT, "data", ".cache.pkl")
@@ -132,12 +143,91 @@ def read_scroll_y():
 
 def redirect_screen(screen, anchor=None, scroll=None, **params):
     q = {"screen": screen, **{k: v for k, v in params.items() if v is not None}}
+    if scroll is None:
+        scroll = read_scroll_y()
     if scroll is not None and int(scroll) > 0:
         q["scroll"] = int(scroll)
     url = "/?" + urlencode(q)
     if anchor:
         url += "#" + anchor.lstrip("#")
     return redirect(url)
+
+
+def output_live_payload():
+    """HTML fragments for the current Output screen (AJAX refresh without reload)."""
+    sem = state.get("active_semester", "")
+    query = f"/?screen=output&semester_view={sem}" if sem else "/?screen=output"
+    with app.test_request_context(query):
+        ctx = build_context("output")
+    ctx["gen_running"] = False
+    return render_output_live(ctx)
+
+
+def input_fingerprint():
+    """Stable key for the current courses, periods, and calendar overrides."""
+    overrides_blob = json.dumps(state.get("period_overrides", {}), sort_keys=True)
+    overrides_hash = hashlib.md5(overrides_blob.encode()).hexdigest()
+    return (
+        state.get("courses_file_hash"),
+        state.get("periods_file_hash"),
+        overrides_hash,
+    )
+
+
+def snapshot_schedules(schedules):
+    """Copy schedule assignments so a history entry can restore prior results."""
+    copies = []
+    for sched in schedules:
+        s = Schedule()
+        s.assignments = dict(sched.assignments)
+        copies.append(s)
+    return copies
+
+
+def relevant_gen_history():
+    """History entries that match the currently loaded input files and calendar."""
+    fp = input_fingerprint()
+    result = []
+    for i, entry in enumerate(state["gen_history"]):
+        if entry.get("input_fingerprint") == fp:
+            tagged = dict(entry)
+            tagged["_index"] = i
+            result.append(tagged)
+    return result
+
+
+def clear_generated_results():
+    """Clear schedules, history, and manual edits after course/period data changes."""
+    state["gen_history"] = []
+    state["aleph_schedules"] = []
+    state["bet_schedules"] = []
+    state["edit_history"] = []
+    state["locked_exams"] = set()
+    state["pagination"] = {}
+    state["gen_job"] = {
+        "running": False,
+        "done": False,
+        "timed_out": False,
+        "error": None,
+    }
+
+
+def append_gen_history(aleph_count, bet_count, timed_out):
+    state["gen_history"].append(
+        {
+            "ts": datetime.now(),
+            "programs": list(state["selected_programs"]),
+            "aleph_count": aleph_count,
+            "bet_count": bet_count,
+            "timed_out": timed_out,
+            "input_fingerprint": input_fingerprint(),
+            "aleph_schedules": snapshot_schedules(state["aleph_schedules"]),
+            "bet_schedules": snapshot_schedules(state["bet_schedules"]),
+            "period_overrides": copy.deepcopy(state.get("period_overrides", {})),
+        }
+    )
+    if len(state["gen_history"]) > 2:
+        state["gen_history"].pop(0)
 
 
 def get_effective_period(period):
@@ -320,7 +410,7 @@ def build_context(screen=None):
         "selected_programs": list(state["selected_programs"]),
         "programs": list_programs(),
         "generate_result": gen_result,
-        "gen_history": state["gen_history"],
+        "gen_history": relevant_gen_history(),
         "aleph_periods": [period_to_dict(p) for p in state["periods"] if p.moed == "Aleph"],
         "bet_periods": [period_to_dict(p) for p in state["periods"] if p.moed == "Bet"],
         "active_aleph": state["active_aleph"],
@@ -336,6 +426,8 @@ def build_context(screen=None):
         "can_undo": len(state.get("edit_history", [])) > 0,
         "edit_count": len(state.get("edit_history", [])),
         "custom_events": list(state.get("custom_events", [])),
+        "gen_running": bool(state.get("gen_job", {}).get("running"))
+        or request.args.get("generating") == "1",
     }
 
     drilldown_id = request.args.get("drilldown")
@@ -507,6 +599,10 @@ def run_generation():
         t_b.start()
         deadline = time.time() + hard_timeout
         while (t_a.is_alive() or t_b.is_alive()) and time.time() < deadline:
+            job = state.get("gen_job")
+            if job and job.get("running"):
+                job["aleph_count"] = len(state["aleph_schedules"])
+                job["bet_count"] = len(state["bet_schedules"])
             time.sleep(0.1)
         timed_out = t_a.is_alive() or t_b.is_alive()
 
@@ -517,6 +613,42 @@ def run_generation():
     # Apply the current sort preferences to the freshly generated results.
     apply_sort()
     return len(state["aleph_schedules"]), len(state["bet_schedules"]), timed_out
+
+
+def _run_generation_job():
+    """Run generation in a background thread; updates gen_job for live polling."""
+    state["gen_job"] = {
+        "running": True,
+        "done": False,
+        "timed_out": False,
+        "aleph_count": 0,
+        "bet_count": 0,
+        "error": None,
+        "flash": None,
+    }
+    try:
+        aleph_count, bet_count, timed_out = run_generation()
+        append_gen_history(aleph_count, bet_count, timed_out)
+        flash_msg, flash_type = _generation_flash_message(aleph_count, bet_count, timed_out)
+        state["gen_job"].update(
+            {
+                "running": False,
+                "done": True,
+                "timed_out": timed_out,
+                "aleph_count": aleph_count,
+                "bet_count": bet_count,
+                "flash": {"msg": flash_msg, "type": flash_type},
+            }
+        )
+    except Exception as exc:
+        state["gen_job"].update(
+            {
+                "running": False,
+                "done": True,
+                "error": str(exc),
+                "flash": {"msg": str(exc), "type": "err"},
+            }
+        )
 
 
 def apply_sort():
@@ -643,6 +775,17 @@ def update_sort():
         set_flash(f"Sorted by {len(criteria)} criterion(s)", "ok")
     else:
         set_flash("Sorting cleared — showing generation order", "ok")
+
+    if _ajax_request():
+        flash_msg = (
+            f"Sorted by {len(criteria)} criterion(s)" if criteria
+            else "Sorting cleared — showing generation order"
+        )
+        return jsonify({
+            "ok": True,
+            "flash": {"msg": flash_msg, "type": "ok"},
+            **output_live_payload(),
+        })
     return redirect_screen("output", semester_view=state.get("active_semester", ""))
 
 
@@ -769,9 +912,13 @@ def whatif_apply():
     )
 
     moves = 1 + len(result.get("cascade", []))
-    set_flash(f"Applied {moves} move(s)" + ("" if result["solved"] else " — issues remain"),
-              "ok" if result["solved"] else "err")
+    msg = f"Applied {moves} move(s)" + ("" if result["solved"] else " — issues remain")
+    kind = "ok" if result["solved"] else "err"
+    set_flash(msg, kind)
+    result["ok"] = True
     result["can_undo"] = True
+    result["flash"] = {"msg": msg, "type": kind}
+    result.update(output_live_payload())
     return jsonify(result)
 
 
@@ -809,10 +956,16 @@ def whatif_undo():
 
     entry = history.pop()
     entry["schedule"].assignments = entry["assignments"]
-    set_flash(f"Undid: {entry['label']}", "ok")
+    flash_msg = f"Undid: {entry['label']}"
+    set_flash(flash_msg, "ok")
 
     if _ajax_request():
-        return jsonify({"ok": True, "remaining": len(history)})
+        return jsonify({
+            "ok": True,
+            "remaining": len(history),
+            "flash": {"msg": flash_msg, "type": "ok"},
+            **output_live_payload(),
+        })
     return redirect_screen("output", semester_view=state.get("active_semester", ""))
 
 
@@ -841,10 +994,21 @@ def upload_courses():
             state["courses"] = new_courses
             state["selected_programs"] = []
         state["courses_file_hash"] = file_hash(path)
+        clear_generated_results()
         save_cache()
-        set_flash(f"Courses loaded — {len(state['courses'])} records", "ok")
+        msg = (
+            f"Courses loaded — {len(state['courses'])} records. "
+            "Generation history and schedules were cleared."
+        )
+        set_flash(msg, "ok")
+        if _ajax_request():
+            payload = _upload_status_payload()
+            payload.update({"ok": True, "flash": {"msg": msg, "type": "ok"}})
+            return jsonify(payload)
     except Exception as e:
         set_flash(str(e), "err")
+        if _ajax_request():
+            return jsonify({"ok": False, "error": str(e)}), 400
     return redirect_screen("input", anchor="program-selection")
 
 
@@ -868,10 +1032,21 @@ def upload_periods():
             state["period_overrides"] = {}
             state["selected_programs"] = []
         state["periods_file_hash"] = file_hash(path)
+        clear_generated_results()
         save_cache()
-        set_flash(f"Periods loaded — {len(state['periods'])} records", "ok")
+        msg = (
+            f"Periods loaded — {len(state['periods'])} records. "
+            "Generation history and schedules were cleared."
+        )
+        set_flash(msg, "ok")
+        if _ajax_request():
+            payload = _upload_status_payload()
+            payload.update({"ok": True, "flash": {"msg": msg, "type": "ok"}})
+            return jsonify(payload)
     except Exception as e:
         set_flash(str(e), "err")
+        if _ajax_request():
+            return jsonify({"ok": False, "error": str(e)}), 400
     return redirect_screen("input", anchor="file-loading")
 
 
@@ -931,9 +1106,30 @@ def _generation_ajax_payload(aleph_count, bet_count, flash_msg, flash_type):
     return jsonify({
         "ok": True,
         "gen_result": format_generate_result(aleph_count, bet_count),
-        "history_html": render_gen_history_html(state["gen_history"]),
+        "history_html": render_gen_history_html(relevant_gen_history()),
         "flash": {"msg": flash_msg, "type": flash_type},
     })
+
+
+def _upload_status_payload():
+    courses_count = len(state["courses"])
+    periods_count = len(state["periods"])
+    ctx = {
+        "courses_count": courses_count,
+        "periods_count": periods_count,
+        "selected_programs": list(state["selected_programs"]),
+        "programs": list_programs(),
+    }
+    return {
+        "courses_count": courses_count,
+        "periods_count": periods_count,
+        "courses_status": f"✓ {courses_count} loaded" if courses_count else "Not loaded",
+        "periods_status": f"✓ {periods_count} loaded" if periods_count else "Not loaded",
+        "program_grid_html": render_program_grid_html(ctx),
+        "sel_count": len(state["selected_programs"]),
+        "gen_result": "",
+        "history_html": "",
+    }
 
 
 @app.route("/generate", methods=["POST"])
@@ -956,25 +1152,43 @@ def generate():
         set_flash("No programs selected", "err")
         return redirect_screen("input")
 
-    aleph_count, bet_count, timed_out = run_generation()
-    state["gen_history"].append(
-        {
-            "ts": datetime.now(),
-            "programs": list(state["selected_programs"]),
-            "aleph_count": aleph_count,
-            "bet_count": bet_count,
-            "timed_out": timed_out,
-        }
-    )
-    if len(state["gen_history"]) > 2:
-        state["gen_history"].pop(0)
+    if state["gen_job"].get("running"):
+        if ajax:
+            return jsonify({"ok": False, "error": "Generation already in progress"}), 409
+        set_flash("Generation already in progress", "err")
+        return redirect_screen("input")
 
-    flash_msg, flash_type = _generation_flash_message(aleph_count, bet_count, timed_out)
-    set_flash(flash_msg, flash_type)
+    threading.Thread(target=_run_generation_job, daemon=True).start()
 
     if ajax:
-        return _generation_ajax_payload(aleph_count, bet_count, flash_msg, flash_type)
+        return jsonify({"ok": True, "started": True})
     return redirect_screen("input")
+
+
+@app.route("/generate/status")
+def generate_status():
+    job = state.get("gen_job", {})
+    aleph_count = len(state["aleph_schedules"])
+    bet_count = len(state["bet_schedules"])
+    payload = {
+        "running": bool(job.get("running")),
+        "done": bool(job.get("done")),
+        "aleph_count": aleph_count,
+        "bet_count": bet_count,
+        "timed_out": bool(job.get("timed_out")),
+        "error": job.get("error"),
+        "gen_result": format_generate_result(aleph_count, bet_count),
+    }
+    if job.get("running") or job.get("done"):
+        with app.test_request_context("/?screen=output"):
+            ctx = build_context("output")
+        ctx["gen_running"] = bool(job.get("running"))
+        payload.update(render_output_live(ctx))
+    if job.get("done"):
+        payload["history_html"] = render_gen_history_html(relevant_gen_history())
+        if job.get("flash"):
+            payload["flash"] = job["flash"]
+    return jsonify(payload)
 
 
 @app.route("/history/restore", methods=["POST"])
@@ -986,9 +1200,20 @@ def history_restore():
         idx = -1
     if 0 <= idx < len(state["gen_history"]):
         entry = state["gen_history"][idx]
+        if entry.get("input_fingerprint") != input_fingerprint():
+            if ajax:
+                return jsonify({"ok": False, "error": "History entry does not match current input files"}), 400
+            set_flash("History entry does not match current input files", "err")
+            return redirect_screen("input")
         state["selected_programs"] = list(entry["programs"])
+        state["aleph_schedules"] = snapshot_schedules(entry.get("aleph_schedules", []))
+        state["bet_schedules"] = snapshot_schedules(entry.get("bet_schedules", []))
+        state["period_overrides"] = copy.deepcopy(entry.get("period_overrides", {}))
+        state["edit_history"] = []
+        state["locked_exams"] = set()
+        apply_sort()
         state["gen_history"].append(state["gen_history"].pop(idx))
-        flash_msg = "Previous run restored — programs re-selected"
+        flash_msg = "Previous run restored — programs, calendar, and schedules recovered"
         set_flash(flash_msg, "ok")
         if ajax:
             aleph_count = len(state["aleph_schedules"])
@@ -996,7 +1221,7 @@ def history_restore():
             return jsonify({
                 "ok": True,
                 "gen_result": format_generate_result(aleph_count, bet_count),
-                "history_html": render_gen_history_html(state["gen_history"]),
+                "history_html": render_gen_history_html(relevant_gen_history()),
                 "flash": {"msg": flash_msg, "type": "ok"},
                 "count": len(state["selected_programs"]),
                 "selected": list(state["selected_programs"]),
@@ -1166,7 +1391,7 @@ def export_schedule():
         
     lines = [
         "=" * 70,
-        "  SCHEDULIX — Exam Schedule Generator  |  Version 2.0",
+        "  SCHEDULIX — Exam Schedule Generator  |  Version 34.0",
         "=" * 70,
         f"  Selected Programs : {', '.join(str(p) for p in state['selected_programs'])}",
         "=" * 70 + "\n",
@@ -1191,8 +1416,8 @@ def export_schedule():
         lines.append("-" * 70)
 
         for moed_label, sched in [
-            ("Moed Aleph  (מועד א׳)", aleph_sched),
-            ("Moed Bet  (מועד ב׳)", bet_sched),
+            ("Moed Aleph", aleph_sched),
+            ("Moed Bet", bet_sched),
         ]:
             lines.append("─" * 70)
             lines.append(f"  {moed_label}")
@@ -1232,6 +1457,7 @@ def try_load_defaults():
         print("[Startup] Using cached data.")
         return
     print("[Startup] Loading from default data files...")
+    clear_generated_results()
     try:
         state["courses"] = CourseParser().parse(courses_path)
         state["courses_file_hash"] = ch
