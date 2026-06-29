@@ -5,8 +5,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from datetime import datetime
 from src.models import Course, Program, Schedule, ExamDate, SchedulingConstraints
-from src.scheduler.whatif import WhatIfEngine, ConstraintEvaluator, Move, ScheduleState
-
+from src.scheduler.whatif.ConstraintEvaluator import ConstraintEvaluator
+from src.scheduler.whatif.WhatIfEngine import WhatIfEngine
+from src.scheduler.whatif.Move import Move
+from src.scheduler.whatif.ScheduleState import ScheduleState
 
 def _course(cid, name, program_id, year, requirement):
     return Course(name, cid, "Dr", [Program(program_id, year, "FALL", requirement)], "Exam")
