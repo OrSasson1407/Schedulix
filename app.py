@@ -1416,8 +1416,8 @@ def export_schedule():
         lines.append("-" * 70)
 
         for moed_label, sched in [
-            ("Moed Aleph  (מועד א׳)", aleph_sched),
-            ("Moed Bet  (מועד ב׳)", bet_sched),
+            ("Moed Aleph", aleph_sched),
+            ("Moed Bet", bet_sched),
         ]:
             lines.append("─" * 70)
             lines.append(f"  {moed_label}")
