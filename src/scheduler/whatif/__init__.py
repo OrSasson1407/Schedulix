@@ -1,16 +1,5 @@
-from .WhatIfEngine import WhatIfEngine
-from .ConstraintEvaluator import ConstraintEvaluator
-from .Move import Move
-from .ScheduleState import ScheduleState
-from .CascadeResolver import CascadeResolver
-from .Violation import Violation, ViolationReport
+"""What-if / domino-effect engine for post-generation schedule edits."""
 
-__all__ = [
-    "WhatIfEngine",
-    "ConstraintEvaluator",
-    "Move",
-    "ScheduleState",
-    "CascadeResolver",
-    "Violation",
-    "ViolationReport",
-]
+from .WhatIfEngine import WhatIfEngine
+
+__all__ = ["WhatIfEngine"]
