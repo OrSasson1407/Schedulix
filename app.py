@@ -1,4 +1,4 @@
-"""
+﻿"""
 app.py — Schedulix V2 (Python + CSS only)
 
 All UI is built in Python (src/ui/views.py) and styled with static/style.css.

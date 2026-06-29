@@ -9,7 +9,7 @@ Output format (per SRS §2.3):
   - Each entry shows: date, course name, instructor.
 
 Designed to be easily extended for future output formats (HTML, CSV, etc.)
-by subclassing or adding format strategies in v2.0+.
+by subclassing or adding format strategies in v34.0+.
 """
 
 
