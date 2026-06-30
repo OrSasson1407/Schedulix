@@ -207,6 +207,7 @@ class TestUIViews(unittest.TestCase):
         html = render_gen_history_html(history)
 
         self.assertIn("Generation history", html)
+        self.assertIn("Only entries matching the currently loaded files", html)
         self.assertIn("current", html)
         self.assertIn("Restore", html)
         self.assertIn("3 Aleph", html)
@@ -261,7 +262,7 @@ class TestUIViews(unittest.TestCase):
         html = render_page(ctx)
 
         self.assertIn("Schedulix", html)
-        self.assertIn("Version 2.0", html)
+        self.assertIn("Version 34.0", html)
         self.assertIn("Schedulix logo", html)
         self.assertIn("/public/SchedulixLogo.jpeg", html)
 
