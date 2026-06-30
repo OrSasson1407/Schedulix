@@ -55,7 +55,7 @@ Not run yet.
 - System clearly reports that no valid schedule was- System clearly reports that no v resul- System clearly reports that no valid schedule was- Syints and try again.
 
 ### Status
-NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN — What-If SchedNNNNNNNNNNNN### Steps
+## E2E Flow 3 — Exam Reschedule Flow
 1. Open a generated schedule.
 2. Move an exam to a new date.
 3. Preview the change.

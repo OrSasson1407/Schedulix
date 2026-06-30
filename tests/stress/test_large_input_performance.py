@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timedelta
 
 from src.models import Course, Program, Schedule, ExamDate, SchedulingConstraints
-from src.scheduler.whatif.ConstraintEvaluator import ConstraintEvaluator
+from src.scheduler.reschedule.ConstraintEvaluator import ConstraintEvaluator
 
 def _course(cid, name, program_id="P", year=1, requirement="Obligatory"):
     return Course(

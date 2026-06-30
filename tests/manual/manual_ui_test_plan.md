@@ -94,7 +94,7 @@ Not run yet.
 
 ---
 
-## Manual Test 6 — What-If Drag/Move Flow
+## Manual Test 6 — Exam Reschedule Drag/Move Flow
 
 ### Steps
 1. Open an existing schedule.
@@ -146,7 +146,7 @@ Not run yetNot run yetNot run yetNot run yetNot run yetN##Not run yetNot run yet
 5. Configure sorting.
 6. Generate schedules.
 7. Review generated schedules.
-8. Use what-if editing.
+8. Use exam reschedule editing.
 9. Export or view final schedule output.
 
 ### Expected Result

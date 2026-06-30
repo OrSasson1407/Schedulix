@@ -29,7 +29,7 @@ from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
 from src.scheduler.SchedulerSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
-from src.scheduler.whatif import WhatIfEngine
+from src.scheduler.reschedule import RescheduleEngine
 from src.models.ExamPeriod import ExamPeriod
 from src.models.Schedule import Schedule
 from src.models.Constraints import SchedulingConstraints
@@ -806,9 +806,9 @@ def _companion_dates(companion_schedule):
     return out
 
 
-def _active_whatif_engine(moed_key):
+def _active_reschedule_engine(moed_key):
     """
-    Builds a WhatIfEngine for the schedule currently displayed on the Output screen
+    Builds a RescheduleEngine for the schedule currently displayed on the Output screen
     for the given moed ('aleph'/'bet'). Returns (engine, schedule) or None.
     """
     active_sem = state.get("active_semester", "")
@@ -844,25 +844,25 @@ def _active_whatif_engine(moed_key):
         if key.startswith(f"{active_sem}|{moed_key}|")
     }
 
-    engine = WhatIfEngine(
+    engine = RescheduleEngine(
         schedule, available, moed, constraints,
         companion_dates=companion, locked=locked,
     )
     return engine, schedule
 
 
-def _whatif_params():
+def _reschedule_params():
     moed_key = (request.form.get("moed") or "aleph").lower()
     if moed_key not in ("aleph", "bet"):
         moed_key = "aleph"
     return moed_key, request.form.get("course_id", ""), request.form.get("new_date", "")
 
 
-@app.route("/whatif/preview", methods=["POST"])
-def whatif_preview():
-    """Instant 'domino effect' view for a hypothetical drag (no changes applied)."""
-    moed_key, course_id, new_date = _whatif_params()
-    built = _active_whatif_engine(moed_key)
+@app.route("/reschedule/preview", methods=["POST"])
+def reschedule_preview():
+    """Instant cascade preview for a hypothetical drag (no changes applied)."""
+    moed_key, course_id, new_date = _reschedule_params()
+    built = _active_reschedule_engine(moed_key)
     if not built:
         return jsonify({"ok": False, "error": "No active schedule to edit"}), 400
     engine, _ = built
@@ -873,11 +873,11 @@ def whatif_preview():
     return jsonify({"ok": True, **report.to_dict()})
 
 
-@app.route("/whatif/resolve", methods=["POST"])
-def whatif_resolve():
+@app.route("/reschedule/resolve", methods=["POST"])
+def reschedule_resolve():
     """Returns the before/after violations and the minimal cascade plan."""
-    moed_key, course_id, new_date = _whatif_params()
-    built = _active_whatif_engine(moed_key)
+    moed_key, course_id, new_date = _reschedule_params()
+    built = _active_reschedule_engine(moed_key)
     if not built:
         return jsonify({"ok": False, "error": "No active schedule to edit"}), 400
     engine, _ = built
@@ -887,11 +887,11 @@ def whatif_resolve():
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
-@app.route("/whatif/apply", methods=["POST"])
-def whatif_apply():
+@app.route("/reschedule/apply", methods=["POST"])
+def reschedule_apply():
     """Commits the dragged move plus its resolved cascade onto the live schedule."""
-    moed_key, course_id, new_date = _whatif_params()
-    built = _active_whatif_engine(moed_key)
+    moed_key, course_id, new_date = _reschedule_params()
+    built = _active_reschedule_engine(moed_key)
     if not built:
         return jsonify({"ok": False, "error": "No active schedule to edit"}), 400
     engine, schedule = built
@@ -922,8 +922,8 @@ def whatif_apply():
     return jsonify(result)
 
 
-@app.route("/whatif/lock", methods=["POST"])
-def whatif_lock():
+@app.route("/reschedule/lock", methods=["POST"])
+def reschedule_lock():
     """Toggles the lock state of a single exam (locked exams cannot be moved)."""
     moed_key = (request.form.get("moed") or "aleph").lower()
     if moed_key not in ("aleph", "bet"):
@@ -944,8 +944,8 @@ def whatif_lock():
     return jsonify({"ok": True, "course_id": course_id, "locked": is_locked})
 
 
-@app.route("/whatif/undo", methods=["POST"])
-def whatif_undo():
+@app.route("/reschedule/undo", methods=["POST"])
+def reschedule_undo():
     """Rolls back the most recent manual edit, one step at a time."""
     history = state["edit_history"]
     if not history:

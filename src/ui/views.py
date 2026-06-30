@@ -197,6 +197,19 @@ def _render_file_picker(picker_id: str) -> str:
 </div>"""
 
 
+def _theme_toggle_button(*, sidebar: bool = False) -> str:
+    """Reusable light/dark toggle; works in topbar and sidebar."""
+    btn_id = "theme-toggle-sidebar" if sidebar else "theme-toggle"
+    label = '<span class="theme-label">Appearance</span>' if sidebar else ""
+    return (
+        f'<button type="button" class="btn btn-ghost theme-toggle" id="{btn_id}" '
+        f'aria-label="Toggle color theme" title="Toggle color theme">'
+        f'<span class="theme-icon theme-icon-dark" aria-hidden="true">🌙</span>'
+        f'<span class="theme-icon theme-icon-light" aria-hidden="true">☀️</span>'
+        f"{label}</button>"
+    )
+
+
 def _render_toast_shell(flash: dict | None = None) -> str:
     """Center-screen notification overlay (flash on load or empty shell for JS)."""
     if flash and flash.get("msg"):
@@ -283,6 +296,16 @@ def render_page(ctx: dict) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Schedulix v34.0</title>
 <link rel="icon" href="{LOGO_URL}" type="image/jpeg"/>
+<script>
+(function () {{
+  var key = "schedulix-theme";
+  var stored = localStorage.getItem(key);
+  var theme = stored === "light" || stored === "dark"
+    ? stored
+    : (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  document.documentElement.setAttribute("data-theme", theme);
+}})();
+</script>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="/static/style.css"/>
 </head>
@@ -303,12 +326,14 @@ def render_page(ctx: dict) -> str:
         <span class="status-dot {dot}"></span>
         <span style="font-size:11px; color:var(--muted);">{_e(status_line)}</span>
       </div>
+      <div class="sidebar-theme">{_theme_toggle_button(sidebar=True)}</div>
     </div>
   </nav>
   
   <div class="main">
     <div class="topbar">
       <div class="topbar-title">{SCREEN_TITLES.get(screen, "")}</div>
+      <div class="topbar-actions">{_theme_toggle_button()}</div>
     </div>
     <div class="content">
       {body}
@@ -319,6 +344,28 @@ def render_page(ctx: dict) -> str:
 
 <script>
 (function () {{
+  function schedulixApplyTheme(theme) {{
+    if (theme !== "light" && theme !== "dark") theme = "dark";
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("schedulix-theme", theme);
+    document.querySelectorAll(".theme-toggle").forEach(function (btn) {{
+      btn.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
+      btn.title = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+    }});
+  }}
+
+  function schedulixToggleTheme() {{
+    var cur = document.documentElement.getAttribute("data-theme") || "dark";
+    schedulixApplyTheme(cur === "dark" ? "light" : "dark");
+  }}
+
+  window.schedulixApplyTheme = schedulixApplyTheme;
+  window.schedulixToggleTheme = schedulixToggleTheme;
+  schedulixApplyTheme(document.documentElement.getAttribute("data-theme") || "dark");
+  document.querySelectorAll(".theme-toggle").forEach(function (btn) {{
+    btn.addEventListener("click", schedulixToggleTheme);
+  }});
+
   // Center-screen notification toast
   function hideToast() {{
     var overlay = document.getElementById("toast-overlay");
@@ -401,7 +448,7 @@ def render_page(ctx: dict) -> str:
         form.classList.contains("file-upload-form") ||
         form.classList.contains("history-restore-form") ||
         form.classList.contains("sort-form") ||
-        form.classList.contains("whatif-undo-form")) return;
+        form.classList.contains("reschedule-undo-form")) return;
     var c = document.querySelector(".content");
     if (!c) return;
     var inp = form.querySelector('input[name="scroll_y"]');
@@ -709,7 +756,7 @@ def render_page(ctx: dict) -> str:
       }}).catch(function () {{ showToast("Sort failed", "err"); }});
     }});
   }});
-  document.querySelectorAll("form.whatif-undo-form").forEach(function (form) {{
+  document.querySelectorAll("form.reschedule-undo-form").forEach(function (form) {{
     form.addEventListener("submit", function (e) {{
       e.preventDefault();
       schedulixFetch(form).then(function (res) {{
@@ -729,19 +776,19 @@ def render_page(ctx: dict) -> str:
   (function() {{
     var overlay = document.createElement('div');
     overlay.id = 'course-modal-overlay';
-    overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;';
+    overlay.className = 'modal-overlay';
     overlay.innerHTML = [
-      '<div id="course-modal" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px 32px;min-width:300px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.4);position:relative;">',
-      '<button onclick="hideCourseModal()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;">\u2715</button>',
-      '<div id="cm-badge" style="font-size:10px;font-family:var(--mono);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;"></div>',
-      '<div id="cm-name" style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:4px;"></div>',
-      '<div id="cm-id" style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:18px;"></div>',
-      '<table style="width:100%;border-collapse:collapse;font-size:13px;">',
-      '<tr><td style="color:var(--muted);padding:5px 0;width:110px;">Instructor</td><td id="cm-instructor" style="color:var(--text);font-weight:500;"></td></tr>',
-      '<tr><td style="color:var(--muted);padding:5px 0;">Requirement</td><td id="cm-req" style="font-weight:500;"></td></tr>',
-      '<tr><td style="color:var(--muted);padding:5px 0;">Programs</td><td id="cm-programs" style="color:var(--text);"></td></tr>',
-      '<tr><td style="color:var(--muted);padding:5px 0;">Exam Date</td><td id="cm-date" style="color:var(--text);font-family:var(--mono);"></td></tr>',
-      '<tr><td style="color:var(--muted);padding:5px 0;">Moed</td><td id="cm-moed" style="font-weight:500;"></td></tr>',
+      '<div id="course-modal" class="course-modal-panel">',
+      '<button type="button" class="course-modal-close" onclick="hideCourseModal()">\\u2715</button>',
+      '<div id="cm-badge" class="course-modal-badge"></div>',
+      '<div id="cm-name" class="course-modal-name"></div>',
+      '<div id="cm-id" class="course-modal-id"></div>',
+      '<table class="course-modal-table">',
+      '<tr><td class="label">Instructor</td><td id="cm-instructor" class="value"></td></tr>',
+      '<tr><td class="label">Requirement</td><td id="cm-req" class="value"></td></tr>',
+      '<tr><td class="label">Programs</td><td id="cm-programs" class="value"></td></tr>',
+      '<tr><td class="label">Exam Date</td><td id="cm-date" class="value" style="font-family:var(--mono);font-weight:400;"></td></tr>',
+      '<tr><td class="label">Moed</td><td id="cm-moed" class="value"></td></tr>',
       '</table></div>'
     ].join('');
     document.body.appendChild(overlay);
@@ -764,134 +811,134 @@ def render_page(ctx: dict) -> str:
     document.getElementById('cm-date').textContent = d.date;
     document.getElementById('cm-moed').textContent = isAleph ? 'Aleph' : 'Bet';
     document.getElementById('cm-moed').style.color = moodColor;
-    document.getElementById('course-modal-overlay').style.display = 'flex';
+    document.getElementById('course-modal-overlay').classList.add('is-open');
   }}
 
   function hideCourseModal() {{
-    document.getElementById('course-modal-overlay').style.display = 'none';
+    document.getElementById('course-modal-overlay').classList.remove('is-open');
   }}
 
-  // ===== What-If / Domino-Effect drag & drop =====
-  var wifDrag_ = null;     // the exam currently being dragged
-  var wifPending_ = null;  // the move awaiting Apply
-  var wifHoverCell_ = null;
-  var wifCheckTimer_ = null;
-  var wifCheckCache_ = {{}};
-  var wifCheckSeq_ = 0;
+  // ===== Exam reschedule drag & drop =====
+  var rscDrag_ = null;     // the exam currently being dragged
+  var rscPending_ = null;  // the move awaiting Apply
+  var rscHoverCell_ = null;
+  var rscCheckTimer_ = null;
+  var rscCheckCache_ = {{}};
+  var rscCheckSeq_ = 0;
 
-  function wifClearDropHints() {{
+  function rscClearDropHints() {{
     document.querySelectorAll(
-      '.out-cal-day.wif-drop-ok, .out-cal-day.wif-drop-bad, .out-cal-day.wif-drop-pending'
+      '.out-cal-day.rsc-drop-ok, .out-cal-day.rsc-drop-bad, .out-cal-day.rsc-drop-pending'
     ).forEach(function (el) {{
-      el.classList.remove('wif-drop-ok', 'wif-drop-bad', 'wif-drop-pending');
+      el.classList.remove('rsc-drop-ok', 'rsc-drop-bad', 'rsc-drop-pending');
     }});
   }}
 
-  function wifDragEnd() {{
-    wifDrag_ = null;
-    wifHoverCell_ = null;
-    wifCheckCache_ = {{}};
-    clearTimeout(wifCheckTimer_);
-    wifClearDropHints();
+  function rscDragEnd() {{
+    rscDrag_ = null;
+    rscHoverCell_ = null;
+    rscCheckCache_ = {{}};
+    clearTimeout(rscCheckTimer_);
+    rscClearDropHints();
   }}
 
-  function wifToast(msg, type) {{
+  function rscToast(msg, type) {{
     if (window.schedulixShowToast) window.schedulixShowToast(msg, type);
   }}
 
-  function wifDrag(e) {{
+  function rscDrag(e) {{
     var d = e.target.dataset;
-    if (d.locked === '1') {{ e.preventDefault(); wifToast('Exam is locked', 'err'); return; }}
-    wifDrag_ = {{ course_id: d.courseId, moed: d.moed, from_date: d.date }};
-    wifCheckCache_ = {{}};
+    if (d.locked === '1') {{ e.preventDefault(); rscToast('Exam is locked', 'err'); return; }}
+    rscDrag_ = {{ course_id: d.courseId, moed: d.moed, from_date: d.date }};
+    rscCheckCache_ = {{}};
     try {{ e.dataTransfer.setData('text/plain', d.courseId); }} catch (err) {{}}
     e.dataTransfer.effectAllowed = 'move';
   }}
 
-  function wifDragEndEvent() {{ wifDragEnd(); }}
+  function rscDragEndEvent() {{ rscDragEnd(); }}
 
-  function wifInstantDropClass(cell) {{
-    if (!wifDrag_) return null;
-    if (cell.moed !== wifDrag_.moed) return 'bad';
-    if (cell.date === wifDrag_.from_date) return null;
+  function rscInstantDropClass(cell) {{
+    if (!rscDrag_) return null;
+    if (cell.moed !== rscDrag_.moed) return 'bad';
+    if (cell.date === rscDrag_.from_date) return null;
     return 'pending';
   }}
 
-  function wifValidateDropCell(el, cell) {{
-    var cacheKey = wifDrag_.course_id + '|' + wifDrag_.from_date + '|' + cell.date;
-    if (wifCheckCache_[cacheKey] !== undefined) {{
-      el.classList.remove('wif-drop-pending');
-      el.classList.add(wifCheckCache_[cacheKey] ? 'wif-drop-ok' : 'wif-drop-bad');
+  function rscValidateDropCell(el, cell) {{
+    var cacheKey = rscDrag_.course_id + '|' + rscDrag_.from_date + '|' + cell.date;
+    if (rscCheckCache_[cacheKey] !== undefined) {{
+      el.classList.remove('rsc-drop-pending');
+      el.classList.add(rscCheckCache_[cacheKey] ? 'rsc-drop-ok' : 'rsc-drop-bad');
       return;
     }}
-    clearTimeout(wifCheckTimer_);
-    var seq = ++wifCheckSeq_;
-    wifCheckTimer_ = setTimeout(function () {{
-      if (wifHoverCell_ !== el || !wifDrag_) return;
-      wifPost('/whatif/resolve', {{
-        moed: wifDrag_.moed,
-        course_id: wifDrag_.course_id,
+    clearTimeout(rscCheckTimer_);
+    var seq = ++rscCheckSeq_;
+    rscCheckTimer_ = setTimeout(function () {{
+      if (rscHoverCell_ !== el || !rscDrag_) return;
+      rscPost('/reschedule/resolve', {{
+        moed: rscDrag_.moed,
+        course_id: rscDrag_.course_id,
         new_date: cell.date,
       }}).then(function (data) {{
-        if (wifHoverCell_ !== el || seq !== wifCheckSeq_) return;
+        if (rscHoverCell_ !== el || seq !== rscCheckSeq_) return;
         var ok = !!(data.ok && data.solved);
-        wifCheckCache_[cacheKey] = ok;
-        el.classList.remove('wif-drop-pending');
-        el.classList.add(ok ? 'wif-drop-ok' : 'wif-drop-bad');
+        rscCheckCache_[cacheKey] = ok;
+        el.classList.remove('rsc-drop-pending');
+        el.classList.add(ok ? 'rsc-drop-ok' : 'rsc-drop-bad');
       }}).catch(function () {{
-        if (wifHoverCell_ !== el) return;
-        wifCheckCache_[cacheKey] = false;
-        el.classList.remove('wif-drop-pending');
-        el.classList.add('wif-drop-bad');
+        if (rscHoverCell_ !== el) return;
+        rscCheckCache_[cacheKey] = false;
+        el.classList.remove('rsc-drop-pending');
+        el.classList.add('rsc-drop-bad');
       }});
     }}, 100);
   }}
 
-  function wifToggleLock(e, btn) {{
+  function rscToggleLock(e, btn) {{
     e.stopPropagation();
     var block = btn.parentNode;
     var d = block.dataset;
-    wifPost('/whatif/lock', {{ moed: d.moed, course_id: d.courseId }}).then(function (data) {{
-      if (!data.ok) {{ wifToast(data.error || 'Lock failed', 'err'); return; }}
+    rscPost('/reschedule/lock', {{ moed: d.moed, course_id: d.courseId }}).then(function (data) {{
+      if (!data.ok) {{ rscToast(data.error || 'Lock failed', 'err'); return; }}
       d.locked = data.locked ? '1' : '0';
       block.classList.toggle('locked', data.locked);
       block.setAttribute('draggable', data.locked ? 'false' : 'true');
       btn.textContent = data.locked ? '🔒' : '🔓';
-      wifToast(data.locked ? 'Exam locked' : 'Exam unlocked', 'ok');
-    }}).catch(function () {{ wifToast('Lock failed', 'err'); }});
+      rscToast(data.locked ? 'Exam locked' : 'Exam unlocked', 'ok');
+    }}).catch(function () {{ rscToast('Lock failed', 'err'); }});
   }}
 
-  function wifOver(e) {{
+  function rscOver(e) {{
     e.preventDefault();
-    if (!wifDrag_) return;
+    if (!rscDrag_) return;
     var el = e.currentTarget;
     var cell = el.dataset;
-    e.dataTransfer.dropEffect = cell.moed === wifDrag_.moed ? 'move' : 'none';
+    e.dataTransfer.dropEffect = cell.moed === rscDrag_.moed ? 'move' : 'none';
 
-    if (wifHoverCell_ === el) return;
-    wifHoverCell_ = el;
-    wifClearDropHints();
+    if (rscHoverCell_ === el) return;
+    rscHoverCell_ = el;
+    rscClearDropHints();
 
-    var instant = wifInstantDropClass(cell);
+    var instant = rscInstantDropClass(cell);
     if (instant === 'bad') {{
-      el.classList.add('wif-drop-bad');
+      el.classList.add('rsc-drop-bad');
       return;
     }}
     if (instant === null) return;
 
-    el.classList.add('wif-drop-pending');
-    wifValidateDropCell(el, cell);
+    el.classList.add('rsc-drop-pending');
+    rscValidateDropCell(el, cell);
   }}
 
-  function wifLeave(e) {{
+  function rscLeave(e) {{
     var el = e.currentTarget;
     var rel = e.relatedTarget;
     if (rel && el.contains(rel)) return;
-    el.classList.remove('wif-drop-ok', 'wif-drop-bad', 'wif-drop-pending');
-    if (wifHoverCell_ === el) wifHoverCell_ = null;
+    el.classList.remove('rsc-drop-ok', 'rsc-drop-bad', 'rsc-drop-pending');
+    if (rscHoverCell_ === el) rscHoverCell_ = null;
   }}
 
-  function wifPost(url, params) {{
+  function rscPost(url, params) {{
     return fetch(url, {{
       method: 'POST',
       headers: {{
@@ -902,118 +949,120 @@ def render_page(ctx: dict) -> str:
     }}).then(function (r) {{ return r.json(); }});
   }}
 
-  function wifDrop(e) {{
+  function rscDrop(e) {{
     e.preventDefault();
-    wifClearDropHints();
-    wifHoverCell_ = null;
+    rscClearDropHints();
+    rscHoverCell_ = null;
     var cell = e.currentTarget.dataset;
-    if (!wifDrag_) return;
-    if (cell.moed !== wifDrag_.moed) {{ wifToast('Drag within the same moed', 'err'); return; }}
-    if (cell.date === wifDrag_.from_date) {{ wifDrag_ = null; return; }}
-    var params = {{ moed: wifDrag_.moed, course_id: wifDrag_.course_id, new_date: cell.date }};
-    wifPending_ = params;
-    wifPost('/whatif/resolve', params).then(function (data) {{
-      if (!data.ok) {{ wifShowError(data.error || 'This move is not allowed.'); return; }}
-      wifShow(data);
-    }}).catch(function () {{ wifToast('What-if failed', 'err'); }});
-    wifDrag_ = null;
+    if (!rscDrag_) return;
+    if (cell.moed !== rscDrag_.moed) {{ rscToast('Drag within the same moed', 'err'); return; }}
+    if (cell.date === rscDrag_.from_date) {{ rscDrag_ = null; return; }}
+    var params = {{ moed: rscDrag_.moed, course_id: rscDrag_.course_id, new_date: cell.date }};
+    rscPending_ = params;
+    rscPost('/reschedule/resolve', params).then(function (data) {{
+      if (!data.ok) {{ rscShowError(data.error || 'This move is not allowed.'); return; }}
+      rscShow(data);
+    }}).catch(function () {{ rscToast('Reschedule preview failed', 'err'); }});
+    rscDrag_ = null;
   }}
 
-  function wifList(items, empty, cls) {{
-    if (!items || !items.length) return '<div class="wif-empty">' + empty + '</div>';
+  function rscList(items, empty, cls) {{
+    if (!items || !items.length) return '<div class="rsc-empty">' + empty + '</div>';
     return items.map(function (v) {{
-      return '<div class="wif-item ' + (cls || '') + '">' + v.message + '</div>';
+      return '<div class="rsc-item ' + (cls || '') + '">' + v.message + '</div>';
     }}).join('');
   }}
 
-  function wifShow(data) {{
+  function rscShow(data) {{
     var b = data.before || {{}};
     var plan = data.plan || [];
     var planHtml;
     if (b.legal) {{
-      planHtml = '<div class="wif-ok">This move is already legal — no cascade needed.</div>';
+      planHtml = '<div class="rsc-ok">This move is already legal — no cascade needed.</div>';
     }} else if (data.solved) {{
       planHtml = plan.map(function (m, i) {{
-        return '<div class="wif-move">' + (i + 1) + '. Move <strong>' + m.course_name +
+        return '<div class="rsc-move">' + (i + 1) + '. Move <strong>' + m.course_name +
                '</strong>: ' + m.from_date + ' \\u2192 ' + m.to_date + '</div>';
       }}).join('');
-      if (!plan.length) planHtml = '<div class="wif-ok">Legal — no cascade needed.</div>';
+      if (!plan.length) planHtml = '<div class="rsc-ok">Legal — no cascade needed.</div>';
     }} else {{
-      planHtml = '<div class="wif-bad">No legal fix found within the move/time limit.</div>';
+      planHtml = '<div class="rsc-bad">No legal fix found within the move/time limit.</div>';
     }}
-    document.getElementById('wif-sub').textContent =
-      'Move ' + wifPending_.course_id + ' \\u2192 ' + wifPending_.new_date + '  (Moed ' + wifPending_.moed + ')';
-    document.getElementById('wif-violations').innerHTML = wifList(b.violations, 'None \\uD83C\\uDF89', 'bad');
-    document.getElementById('wif-collisions').innerHTML = wifList(b.collisions, 'None', 'warn');
-    document.getElementById('wif-plan').innerHTML = planHtml;
-    var applyBtn = document.getElementById('wif-apply');
+    document.getElementById('rsc-sub').textContent =
+      'Move ' + rscPending_.course_id + ' \\u2192 ' + rscPending_.new_date + '  (Moed ' + rscPending_.moed + ')';
+    document.getElementById('rsc-violations').innerHTML = rscList(b.violations, 'None \\uD83C\\uDF89', 'bad');
+    document.getElementById('rsc-collisions').innerHTML = rscList(b.collisions, 'None', 'warn');
+    document.getElementById('rsc-plan').innerHTML = planHtml;
+    var applyBtn = document.getElementById('rsc-apply');
     applyBtn.textContent = (data.solved && !b.legal && plan.length) ? 'Apply move + cascade' : 'Apply move';
-    document.getElementById('wif-body-normal').style.display = 'block';
-    document.getElementById('wif-body-error').style.display = 'none';
+    document.getElementById('rsc-body-normal').style.display = 'block';
+    document.getElementById('rsc-body-error').style.display = 'none';
     applyBtn.style.display = 'inline-flex';
-    document.getElementById('wif-overlay').style.display = 'flex';
+    document.getElementById('rsc-overlay').classList.add('is-open');
   }}
 
-  function wifShowError(message) {{
-    document.getElementById('wif-sub').textContent =
-      'Move ' + (wifPending_ ? wifPending_.course_id + ' \\u2192 ' + wifPending_.new_date +
-      '  (Moed ' + wifPending_.moed + ')' : '');
-    document.getElementById('wif-error').innerHTML =
-      '<div class="wif-item bad">\\uD83D\\uDCC5 ' + message + '</div>' +
-      '<div class="wif-empty">Exams can only be placed on available dates inside the exam period. ' +
-      'Drop the exam on a valid day to preview its domino effect.</div>';
-    document.getElementById('wif-body-normal').style.display = 'none';
-    document.getElementById('wif-body-error').style.display = 'block';
-    document.getElementById('wif-apply').style.display = 'none';
-    document.getElementById('wif-overlay').style.display = 'flex';
+  function rscShowError(message) {{
+    document.getElementById('rsc-sub').textContent =
+      'Move ' + (rscPending_ ? rscPending_.course_id + ' \\u2192 ' + rscPending_.new_date +
+      '  (Moed ' + rscPending_.moed + ')' : '');
+    document.getElementById('rsc-error').innerHTML =
+      '<div class="rsc-item bad">\\uD83D\\uDCC5 ' + message + '</div>' +
+      '<div class="rsc-empty">Exams can only be placed on available dates inside the exam period. ' +
+      'Drop the exam on a valid day to preview how the move affects the schedule.</div>';
+    document.getElementById('rsc-body-normal').style.display = 'none';
+    document.getElementById('rsc-body-error').style.display = 'block';
+    document.getElementById('rsc-apply').style.display = 'none';
+    document.getElementById('rsc-overlay').classList.add('is-open');
   }}
 
-  function wifHide() {{ document.getElementById('wif-overlay').style.display = 'none'; }}
+  function rscHide() {{
+    document.getElementById('rsc-overlay').classList.remove('is-open');
+  }}
 
-  function wifApply() {{
-    if (!wifPending_) return;
-    wifPost('/whatif/apply', wifPending_).then(function (data) {{
-      if (!data.ok) {{ wifToast(data.error || 'Apply failed', 'err'); return; }}
-      wifHide();
-      wifPending_ = null;
+  function rscApply() {{
+    if (!rscPending_) return;
+    rscPost('/reschedule/apply', rscPending_).then(function (data) {{
+      if (!data.ok) {{ rscToast(data.error || 'Apply failed', 'err'); return; }}
+      rscHide();
+      rscPending_ = null;
       if (window.schedulixApplyOutputLive) window.schedulixApplyOutputLive(data);
-      var undoBtn = document.querySelector('form.whatif-undo-form button');
+      var undoBtn = document.querySelector('form.reschedule-undo-form button');
       if (undoBtn) {{
         undoBtn.disabled = false;
         undoBtn.textContent = '\u21b6 Undo';
       }}
-      if (data.flash && data.flash.msg) wifToast(data.flash.msg, data.flash.type || 'ok');
-    }}).catch(function () {{ wifToast('Apply failed', 'err'); }});
+      if (data.flash && data.flash.msg) rscToast(data.flash.msg, data.flash.type || 'ok');
+    }}).catch(function () {{ rscToast('Apply failed', 'err'); }});
   }}
 
   (function () {{
     var o = document.createElement('div');
-    o.id = 'wif-overlay';
-    o.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;align-items:center;justify-content:center;';
+    o.id = 'rsc-overlay';
+    o.className = 'modal-overlay';
     o.innerHTML = [
-      '<div class="wif-modal">',
-      '<button class="wif-close" onclick="wifHide()">\\u2715</button>',
-      '<div class="wif-title">\\u26A1 What-If / Domino Effect</div>',
-      '<div id="wif-sub" class="wif-subtitle"></div>',
-      '<div id="wif-body-normal">',
-      '<div class="wif-section-title">Baseline requirements violated</div>',
-      '<div id="wif-violations"></div>',
-      '<div class="wif-section-title">Elective courses now colliding</div>',
-      '<div id="wif-collisions"></div>',
-      '<div class="wif-section-title">Minimal cascade to restore a legal schedule</div>',
-      '<div id="wif-plan"></div>',
+      '<div class="rsc-modal">',
+      '<button class="rsc-close" onclick="rscHide()">\\u2715</button>',
+      '<div class="rsc-title">\\u26A1 Exam Reschedule</div>',
+      '<div id="rsc-sub" class="rsc-subtitle"></div>',
+      '<div id="rsc-body-normal">',
+      '<div class="rsc-section-title">Baseline requirements violated</div>',
+      '<div id="rsc-violations"></div>',
+      '<div class="rsc-section-title">Elective courses now colliding</div>',
+      '<div id="rsc-collisions"></div>',
+      '<div class="rsc-section-title">Minimal cascade to restore a legal schedule</div>',
+      '<div id="rsc-plan"></div>',
       '</div>',
-      '<div id="wif-body-error" style="display:none;">',
-      '<div class="wif-section-title">Move not allowed</div>',
-      '<div id="wif-error"></div>',
+      '<div id="rsc-body-error" style="display:none;">',
+      '<div class="rsc-section-title">Move not allowed</div>',
+      '<div id="rsc-error"></div>',
       '</div>',
-      '<div class="wif-actions">',
-      '<button class="btn btn-green" id="wif-apply" onclick="wifApply()">Apply</button>',
-      '<button class="btn btn-secondary" onclick="wifHide()">Cancel</button>',
+      '<div class="rsc-actions">',
+      '<button class="btn btn-green" id="rsc-apply" onclick="rscApply()">Apply</button>',
+      '<button class="btn btn-secondary" onclick="rscHide()">Cancel</button>',
       '</div></div>'
     ].join('');
     document.body.appendChild(o);
-    o.addEventListener('click', function (e) {{ if (e.target === o) wifHide(); }});
+    o.addEventListener('click', function (e) {{ if (e.target === o) rscHide(); }});
   }})();
 </script>
 </body>
@@ -1791,7 +1840,7 @@ def _render_output(ctx: dict) -> str:
     undo_disabled = "" if can_undo else " disabled"
     undo_label = "↶ Undo" + (f" ({edit_count})" if edit_count else "")
     undo_btn = (
-        '<form method="post" action="/whatif/undo" class="whatif-undo-form" style="display:inline;">'
+        '<form method="post" action="/reschedule/undo" class="reschedule-undo-form" style="display:inline;">'
         f'<input type="hidden" name="semester_view" value="{_e(active_sem)}"/>'
         f'<button type="submit" class="btn btn-secondary"{undo_disabled}>{undo_label}</button>'
         '</form>'
@@ -1808,7 +1857,7 @@ def _render_output(ctx: dict) -> str:
         '<div class="export-bar">' +
         f'<a class="btn btn-primary" href="{export_href}"{export_disabled}>{export_label}</a>' +
         undo_btn +
-        '<span class="wif-hint">💡 Drag any exam to another day to preview the domino effect · 🔒 lock to freeze an exam</span>' +
+        '<span class="rsc-hint">💡 Drag any exam to another day to preview the reschedule impact · 🔒 lock to freeze an exam</span>' +
         '</div>' +
         f'<div id="output-body">{out_body}</div>' +
         '</div>'
@@ -1977,7 +2026,7 @@ def _render_result_calendar(entries: list, moed: str) -> str:
                 exam_html += (
                     f'<div class="exam-block {req} {moed}{locked_cls}" title="{title}" '
                     f'draggable="{"false" if is_locked else "true"}" '
-                    f'ondragstart="wifDrag(event)" ondragend="wifDragEndEvent()" '
+                    f'ondragstart="rscDrag(event)" ondragend="rscDragEndEvent()" '
                     f'data-course-id="{_e(e["course_id"])}" '
                     f'data-course-name="{_e(e["course_name"])}" '
                     f'data-instructor="{_e(e["instructor"])}" '
@@ -1987,14 +2036,14 @@ def _render_result_calendar(entries: list, moed: str) -> str:
                     f'data-moed="{_e(moed)}" '
                     f'data-locked="{1 if is_locked else 0}">'
                     f'<button type="button" class="exam-lock" title="Lock / unlock exam" '
-                    f'onclick="wifToggleLock(event, this)">{lock_icon}</button>'
+                    f'onclick="rscToggleLock(event, this)">{lock_icon}</button>'
                     f'<span class="exam-block-label" onclick="showCourseModal(this.parentNode)">'
                     f'{_e(e["course_id"])} {_e(e["course_name"])}</span>'
                     f'</div>'
                 )
             cells += (
                 f'<div class="out-cal-day" data-date="{date_str}" data-moed="{_e(moed)}" '
-                f'ondragover="wifOver(event)" ondragleave="wifLeave(event)" ondrop="wifDrop(event)">'
+                f'ondragover="rscOver(event)" ondragleave="rscLeave(event)" ondrop="rscDrop(event)">'
                 f'<div class="out-day-num">{d}</div>{exam_html}</div>'
             )
             
