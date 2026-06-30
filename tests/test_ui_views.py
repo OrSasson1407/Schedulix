@@ -249,6 +249,55 @@ class TestUIViews(unittest.TestCase):
         self.assertIn('Space+Mono', html)
         self.assertIn('DM+Sans', html)
 
+    def test_light_dark_theme_toggle_is_present(self):
+        ctx = {
+            "screen": "input",
+            "courses_count": 0,
+            "periods_count": 0,
+            "selected_programs": [],
+            "programs": [],
+        }
+
+        html = render_page(ctx)
+
+        self.assertIn('schedulix-theme', html)
+        self.assertIn('data-theme', html)
+        self.assertIn('theme-toggle', html)
+        self.assertIn('schedulixToggleTheme', html)
+        self.assertIn('theme-toggle-sidebar', html)
+
+    def test_theme_boot_script_runs_before_stylesheet(self):
+        ctx = {
+            "screen": "calendar",
+            "courses_count": 0,
+            "periods_count": 0,
+            "selected_programs": [],
+            "programs": [],
+        }
+
+        html = render_page(ctx)
+
+        script_pos = html.find('schedulix-theme')
+        css_pos = html.find('/static/style.css')
+        self.assertGreater(script_pos, 0)
+        self.assertGreater(css_pos, script_pos)
+
+    def test_standalone_overlay_classes_are_used(self):
+        ctx = {
+            "screen": "output",
+            "courses_count": 1,
+            "periods_count": 1,
+            "selected_programs": ["83101"],
+            "programs": [],
+            "aleph_schedules": [],
+            "bet_schedules": [],
+        }
+
+        html = render_page(ctx)
+
+        self.assertIn('modal-overlay', html)
+        self.assertIn('course-modal-panel', html)
+
     def test_page_includes_logo_and_branding(self):
         ctx = {
             "screen": "input",

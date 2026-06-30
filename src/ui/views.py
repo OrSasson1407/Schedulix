@@ -197,6 +197,19 @@ def _render_file_picker(picker_id: str) -> str:
 </div>"""
 
 
+def _theme_toggle_button(*, sidebar: bool = False) -> str:
+    """Reusable light/dark toggle; works in topbar and sidebar."""
+    btn_id = "theme-toggle-sidebar" if sidebar else "theme-toggle"
+    label = '<span class="theme-label">Appearance</span>' if sidebar else ""
+    return (
+        f'<button type="button" class="btn btn-ghost theme-toggle" id="{btn_id}" '
+        f'aria-label="Toggle color theme" title="Toggle color theme">'
+        f'<span class="theme-icon theme-icon-dark" aria-hidden="true">🌙</span>'
+        f'<span class="theme-icon theme-icon-light" aria-hidden="true">☀️</span>'
+        f"{label}</button>"
+    )
+
+
 def _render_toast_shell(flash: dict | None = None) -> str:
     """Center-screen notification overlay (flash on load or empty shell for JS)."""
     if flash and flash.get("msg"):
@@ -283,6 +296,16 @@ def render_page(ctx: dict) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Schedulix v34.0</title>
 <link rel="icon" href="{LOGO_URL}" type="image/jpeg"/>
+<script>
+(function () {{
+  var key = "schedulix-theme";
+  var stored = localStorage.getItem(key);
+  var theme = stored === "light" || stored === "dark"
+    ? stored
+    : (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  document.documentElement.setAttribute("data-theme", theme);
+}})();
+</script>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="/static/style.css"/>
 </head>
@@ -303,12 +326,14 @@ def render_page(ctx: dict) -> str:
         <span class="status-dot {dot}"></span>
         <span style="font-size:11px; color:var(--muted);">{_e(status_line)}</span>
       </div>
+      <div class="sidebar-theme">{_theme_toggle_button(sidebar=True)}</div>
     </div>
   </nav>
   
   <div class="main">
     <div class="topbar">
       <div class="topbar-title">{SCREEN_TITLES.get(screen, "")}</div>
+      <div class="topbar-actions">{_theme_toggle_button()}</div>
     </div>
     <div class="content">
       {body}
@@ -319,6 +344,28 @@ def render_page(ctx: dict) -> str:
 
 <script>
 (function () {{
+  function schedulixApplyTheme(theme) {{
+    if (theme !== "light" && theme !== "dark") theme = "dark";
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("schedulix-theme", theme);
+    document.querySelectorAll(".theme-toggle").forEach(function (btn) {{
+      btn.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
+      btn.title = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+    }});
+  }}
+
+  function schedulixToggleTheme() {{
+    var cur = document.documentElement.getAttribute("data-theme") || "dark";
+    schedulixApplyTheme(cur === "dark" ? "light" : "dark");
+  }}
+
+  window.schedulixApplyTheme = schedulixApplyTheme;
+  window.schedulixToggleTheme = schedulixToggleTheme;
+  schedulixApplyTheme(document.documentElement.getAttribute("data-theme") || "dark");
+  document.querySelectorAll(".theme-toggle").forEach(function (btn) {{
+    btn.addEventListener("click", schedulixToggleTheme);
+  }});
+
   // Center-screen notification toast
   function hideToast() {{
     var overlay = document.getElementById("toast-overlay");
@@ -729,19 +776,19 @@ def render_page(ctx: dict) -> str:
   (function() {{
     var overlay = document.createElement('div');
     overlay.id = 'course-modal-overlay';
-    overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;';
+    overlay.className = 'modal-overlay';
     overlay.innerHTML = [
-      '<div id="course-modal" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px 32px;min-width:300px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.4);position:relative;">',
-      '<button onclick="hideCourseModal()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;">\u2715</button>',
-      '<div id="cm-badge" style="font-size:10px;font-family:var(--mono);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;"></div>',
-      '<div id="cm-name" style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:4px;"></div>',
-      '<div id="cm-id" style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:18px;"></div>',
-      '<table style="width:100%;border-collapse:collapse;font-size:13px;">',
-      '<tr><td style="color:var(--muted);padding:5px 0;width:110px;">Instructor</td><td id="cm-instructor" style="color:var(--text);font-weight:500;"></td></tr>',
-      '<tr><td style="color:var(--muted);padding:5px 0;">Requirement</td><td id="cm-req" style="font-weight:500;"></td></tr>',
-      '<tr><td style="color:var(--muted);padding:5px 0;">Programs</td><td id="cm-programs" style="color:var(--text);"></td></tr>',
-      '<tr><td style="color:var(--muted);padding:5px 0;">Exam Date</td><td id="cm-date" style="color:var(--text);font-family:var(--mono);"></td></tr>',
-      '<tr><td style="color:var(--muted);padding:5px 0;">Moed</td><td id="cm-moed" style="font-weight:500;"></td></tr>',
+      '<div id="course-modal" class="course-modal-panel">',
+      '<button type="button" class="course-modal-close" onclick="hideCourseModal()">\\u2715</button>',
+      '<div id="cm-badge" class="course-modal-badge"></div>',
+      '<div id="cm-name" class="course-modal-name"></div>',
+      '<div id="cm-id" class="course-modal-id"></div>',
+      '<table class="course-modal-table">',
+      '<tr><td class="label">Instructor</td><td id="cm-instructor" class="value"></td></tr>',
+      '<tr><td class="label">Requirement</td><td id="cm-req" class="value"></td></tr>',
+      '<tr><td class="label">Programs</td><td id="cm-programs" class="value"></td></tr>',
+      '<tr><td class="label">Exam Date</td><td id="cm-date" class="value" style="font-family:var(--mono);font-weight:400;"></td></tr>',
+      '<tr><td class="label">Moed</td><td id="cm-moed" class="value"></td></tr>',
       '</table></div>'
     ].join('');
     document.body.appendChild(overlay);
@@ -764,11 +811,11 @@ def render_page(ctx: dict) -> str:
     document.getElementById('cm-date').textContent = d.date;
     document.getElementById('cm-moed').textContent = isAleph ? 'Aleph' : 'Bet';
     document.getElementById('cm-moed').style.color = moodColor;
-    document.getElementById('course-modal-overlay').style.display = 'flex';
+    document.getElementById('course-modal-overlay').classList.add('is-open');
   }}
 
   function hideCourseModal() {{
-    document.getElementById('course-modal-overlay').style.display = 'none';
+    document.getElementById('course-modal-overlay').classList.remove('is-open');
   }}
 
   // ===== Exam reschedule drag & drop =====
@@ -951,7 +998,7 @@ def render_page(ctx: dict) -> str:
     document.getElementById('rsc-body-normal').style.display = 'block';
     document.getElementById('rsc-body-error').style.display = 'none';
     applyBtn.style.display = 'inline-flex';
-    document.getElementById('rsc-overlay').style.display = 'flex';
+    document.getElementById('rsc-overlay').classList.add('is-open');
   }}
 
   function rscShowError(message) {{
@@ -965,10 +1012,12 @@ def render_page(ctx: dict) -> str:
     document.getElementById('rsc-body-normal').style.display = 'none';
     document.getElementById('rsc-body-error').style.display = 'block';
     document.getElementById('rsc-apply').style.display = 'none';
-    document.getElementById('rsc-overlay').style.display = 'flex';
+    document.getElementById('rsc-overlay').classList.add('is-open');
   }}
 
-  function rscHide() {{ document.getElementById('rsc-overlay').style.display = 'none'; }}
+  function rscHide() {{
+    document.getElementById('rsc-overlay').classList.remove('is-open');
+  }}
 
   function rscApply() {{
     if (!rscPending_) return;
@@ -989,7 +1038,7 @@ def render_page(ctx: dict) -> str:
   (function () {{
     var o = document.createElement('div');
     o.id = 'rsc-overlay';
-    o.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;align-items:center;justify-content:center;';
+    o.className = 'modal-overlay';
     o.innerHTML = [
       '<div class="rsc-modal">',
       '<button class="rsc-close" onclick="rscHide()">\\u2715</button>',
