@@ -1228,36 +1228,36 @@ button#generateBtn:hover,
   color: var(--text);
 }
 
-/* ===== What-If / Domino-Effect ===== */
-.wif-hint {
+/* ===== Exam Reschedule ===== */
+.rsc-hint {
   font-size: 12px;
   color: var(--muted);
   margin-left: 14px;
 }
-.out-cal-day.wif-drop-hover {
+.out-cal-day.rsc-drop-hover {
   outline: 2px dashed var(--green);
   outline-offset: -2px;
   background: rgba(46, 204, 138, 0.10);
 }
 /* Live drag validation — green = legal (incl. cascade), red = illegal */
-.out-cal-day.wif-drop-ok {
+.out-cal-day.rsc-drop-ok {
   outline: 2px solid var(--green);
   outline-offset: -2px;
   background: rgba(46, 204, 138, 0.22);
   box-shadow: inset 0 0 0 1px rgba(46, 204, 138, 0.35);
 }
-.out-cal-day.wif-drop-bad {
+.out-cal-day.rsc-drop-bad {
   outline: 2px solid var(--red);
   outline-offset: -2px;
   background: rgba(224, 82, 82, 0.20);
   box-shadow: inset 0 0 0 1px rgba(224, 82, 82, 0.35);
 }
-.out-cal-day.wif-drop-pending {
+.out-cal-day.rsc-drop-pending {
   outline: 2px dashed var(--muted);
   outline-offset: -2px;
   background: rgba(255, 255, 255, 0.04);
 }
-.wif-modal {
+.rsc-modal {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -1269,7 +1269,7 @@ button#generateBtn:hover,
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
   position: relative;
 }
-.wif-close {
+.rsc-close {
   position: absolute;
   top: 12px;
   right: 16px;
@@ -1280,18 +1280,18 @@ button#generateBtn:hover,
   cursor: pointer;
   line-height: 1;
 }
-.wif-title {
+.rsc-title {
   font-size: 18px;
   font-weight: 700;
   color: var(--text);
 }
-.wif-subtitle {
+.rsc-subtitle {
   font-size: 12px;
   font-family: var(--mono);
   color: var(--muted);
   margin: 4px 0 16px;
 }
-.wif-section-title {
+.rsc-section-title {
   font-size: 11px;
   font-family: var(--mono);
   text-transform: uppercase;
@@ -1299,7 +1299,7 @@ button#generateBtn:hover,
   color: var(--muted-soft);
   margin: 16px 0 6px;
 }
-.wif-item {
+.rsc-item {
   font-size: 13px;
   padding: 7px 10px;
   border-radius: 7px;
@@ -1307,14 +1307,14 @@ button#generateBtn:hover,
   background: var(--surface2);
   border-left: 3px solid var(--border);
 }
-.wif-item.bad { border-left-color: var(--red); }
-.wif-item.warn { border-left-color: var(--yellow); }
-.wif-empty {
+.rsc-item.bad { border-left-color: var(--red); }
+.rsc-item.warn { border-left-color: var(--yellow); }
+.rsc-empty {
   font-size: 12px;
   color: var(--muted-soft);
   padding: 4px 0;
 }
-.wif-move {
+.rsc-move {
   font-size: 13px;
   padding: 7px 10px;
   border-radius: 7px;
@@ -1323,9 +1323,9 @@ button#generateBtn:hover,
   border-left: 3px solid var(--green);
   color: var(--text);
 }
-.wif-ok { font-size: 13px; color: var(--green); padding: 6px 0; }
-.wif-bad { font-size: 13px; color: var(--red); padding: 6px 0; }
-.wif-actions {
+.rsc-ok { font-size: 13px; color: var(--green); padding: 6px 0; }
+.rsc-bad { font-size: 13px; color: var(--red); padding: 6px 0; }
+.rsc-actions {
   display: flex;
   gap: 10px;
   margin-top: 20px;

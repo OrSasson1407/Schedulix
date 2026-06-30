@@ -12,6 +12,18 @@ Designed to be easily extended for future output formats (HTML, CSV, etc.)
 by subclassing or adding format strategies in v34.0+.
 """
 
+import sys
+
+
+def console_print(message: str) -> None:
+    """Print to stdout, tolerating console encodings that cannot represent the text."""
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        sys.stdout.buffer.write((message + "\n").encode(encoding, errors="backslashreplace"))
+        sys.stdout.buffer.flush()
+
 
 class OutputWriter:
     """
@@ -41,7 +53,7 @@ class OutputWriter:
                 f.write(self._format_schedule(schedule, idx))
                 f.write("\n")
 
-        print(f"[OutputWriter] Wrote {len(schedules)} schedule(s) to '{output_path}'.")
+        console_print(f"[OutputWriter] Wrote {len(schedules)} schedule(s) to '{output_path}'.")
 
     def _build_header(self, schedules: list, selected_programs: list) -> str:
         """Builds a summary header for the output file."""

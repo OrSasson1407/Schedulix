@@ -31,7 +31,7 @@ if PROJECT_ROOT not in sys.path:
 from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
-from src.output.OutputWriter import OutputWriter
+from src.output.OutputWriter import OutputWriter, console_print
 
 # ---------------------------------------------------------------------------
 # PATHS — edit these if your files are located elsewhere
@@ -119,7 +119,7 @@ def main():
     writer = OutputWriter()
     writer.write(schedules, OUTPUT_FILE, selected_programs)
 
-    print(f"\n  Output written to: {OUTPUT_FILE}")
+    console_print(f"\n  Output written to: {OUTPUT_FILE}")
     print("  Done.\n")
 
 

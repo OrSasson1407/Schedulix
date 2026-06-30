@@ -1,15 +1,15 @@
 """
-WhatIfEngine.py
+RescheduleEngine.py
 Facade that the UI / Flask controller talks to. It owns the baseline schedule for
 a single moed, the moed's available dates, and the active hard-constraint set, and
 exposes three operations:
 
-  preview(course_id, new_date)  -> ViolationReport      (instant; the "domino" view)
+  preview(course_id, new_date)  -> ViolationReport      (instant; the cascade view)
   resolve(course_id, new_date)  -> dict with before/after reports + minimal plan
   apply(course_id, new_date)    -> mutates the Schedule in place with move + cascade
 
 The engine is framework-free: it depends only on the domain models and the other
-what-if helpers, so it is fully unit-testable and reusable outside Flask.
+reschedule helpers, so it is fully unit-testable and reusable outside Flask.
 """
 
 from src.models.Schedule import Schedule
@@ -19,7 +19,7 @@ from .ConstraintEvaluator import ConstraintEvaluator
 from .CascadeResolver import CascadeResolver
 
 
-class WhatIfEngine:
+class RescheduleEngine:
     def __init__(self, schedule, available_dates, moed, constraints,
                  max_cascade=5, time_budget_ms=400, companion_dates=None, locked=None):
         self.moed = moed
@@ -59,7 +59,7 @@ class WhatIfEngine:
     def resolve(self, course_id, new_date):
         """
         Applies + pins the dragged move, then searches for the minimal cascade.
-        Returns a JSON-friendly dict describing the domino effect and the plan.
+        Returns a JSON-friendly dict describing the cascade effect and the plan.
         """
         forced = self._forced_state(course_id, new_date).with_pin(course_id, self.moed)
         before = self.evaluator.evaluate(self._schedule_from_state(forced))

@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from datetime import datetime, date
 from src.models import Course, Program, Schedule, ExamDate, SchedulingConstraints
-from src.scheduler.whatif import WhatIfEngine, ConstraintEvaluator
+from src.scheduler.reschedule import RescheduleEngine, ConstraintEvaluator
 
 
 def _course(cid, name, program_id, year, requirement):
@@ -46,7 +46,7 @@ class TestMoedSpacingConstraint(unittest.TestCase):
         self.assertTrue(cons.is_satisfied_by(s))
 
 
-class TestMoedSpacingWhatIf(unittest.TestCase):
+class TestMoedSpacingReschedule(unittest.TestCase):
     """Feature 1: enforced interactively via companion dates while editing one moed."""
 
     def setUp(self):
@@ -58,7 +58,7 @@ class TestMoedSpacingWhatIf(unittest.TestCase):
 
     def test_companion_too_close_flags_violation(self):
         # Bet exam fixed at 18-Feb; moving Aleph to 15-Feb leaves only 3 days < 7.
-        engine = WhatIfEngine(
+        engine = RescheduleEngine(
             self.schedule, self.available, "Aleph", self.cons,
             companion_dates={"1": date(2026, 2, 18)},
         )
@@ -66,7 +66,7 @@ class TestMoedSpacingWhatIf(unittest.TestCase):
         self.assertIn("moed_spacing", {v.kind for v in report.violations})
 
     def test_no_companion_means_no_moed_check(self):
-        engine = WhatIfEngine(self.schedule, self.available, "Aleph", self.cons)
+        engine = RescheduleEngine(self.schedule, self.available, "Aleph", self.cons)
         report = engine.preview("1", "2026-02-15")
         self.assertNotIn("moed_spacing", {v.kind for v in report.violations})
 
@@ -84,13 +84,13 @@ class TestExamLocking(unittest.TestCase):
         self.cons = SchedulingConstraints({"mandatory_spacing": {"enabled": True, "k": 2}})
 
     def test_moving_a_locked_exam_is_rejected(self):
-        engine = WhatIfEngine(self.schedule, self.available, "Aleph", self.cons, locked={"1"})
+        engine = RescheduleEngine(self.schedule, self.available, "Aleph", self.cons, locked={"1"})
         with self.assertRaises(ValueError):
             engine.resolve("1", "2026-02-04")
 
     def test_locked_exam_is_not_used_by_cascade(self):
         # Lock OS(2). Dragging Algo onto OS's day must NOT be solvable by moving OS.
-        engine = WhatIfEngine(self.schedule, self.available, "Aleph", self.cons, locked={"2"})
+        engine = RescheduleEngine(self.schedule, self.available, "Aleph", self.cons, locked={"2"})
         res = engine.resolve("1", "2026-02-04")
         moved = {m["course_id"] for m in res["plan"]}
         self.assertNotIn("2", moved)

@@ -264,7 +264,7 @@ class SchedulingConstraints:
 
         Note: the core engine generates each moed independently, so a single-moed
         Schedule never trips this check. It applies to combined schedules and is
-        enforced interactively in the What-If editor via companion dates.
+        enforced interactively in the reschedule editor via companion dates.
         """
         by_course = {}
         for (course, moed), exam_date in schedule.assignments.items():

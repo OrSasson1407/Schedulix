@@ -5,10 +5,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from datetime import datetime
 from src.models import Course, Program, Schedule, ExamDate, SchedulingConstraints
-from src.scheduler.whatif.ConstraintEvaluator import ConstraintEvaluator
-from src.scheduler.whatif.WhatIfEngine import WhatIfEngine
-from src.scheduler.whatif.Move import Move
-from src.scheduler.whatif.ScheduleState import ScheduleState
+from src.scheduler.reschedule.ConstraintEvaluator import ConstraintEvaluator
+from src.scheduler.reschedule.RescheduleEngine import RescheduleEngine
+from src.scheduler.reschedule.Move import Move
+from src.scheduler.reschedule.ScheduleState import ScheduleState
 
 def _course(cid, name, program_id, year, requirement):
     return Course(name, cid, "Dr", [Program(program_id, year, "FALL", requirement)], "Exam")
@@ -58,7 +58,7 @@ class TestConstraintEvaluator(unittest.TestCase):
         self.assertTrue(self.eval.evaluate(s).is_legal)
 
 
-class TestWhatIfEngine(unittest.TestCase):
+class TestRescheduleEngine(unittest.TestCase):
     def setUp(self):
         self.a = _course("1", "Algo", "P", 1, "Obligatory")
         self.b = _course("2", "OS", "P", 1, "Obligatory")
@@ -69,7 +69,7 @@ class TestWhatIfEngine(unittest.TestCase):
         self.cons = SchedulingConstraints({"mandatory_spacing": {"enabled": True, "k": 2}})
 
     def _engine(self):
-        return WhatIfEngine(self.schedule, self.available, "Aleph", self.cons)
+        return RescheduleEngine(self.schedule, self.available, "Aleph", self.cons)
 
     def test_preview_reports_violation_on_clash(self):
         report = self._engine().preview("1", "2026-02-04")  # Algo onto OS day
