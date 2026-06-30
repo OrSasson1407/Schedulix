@@ -1,60 +1,21 @@
 $$$$
-Fall Bench 1
-10001
-Prof. Or Sasson
+Physics 1
+83102
+Prof. O. Some
 83101,1,FALL,Obligatory
-Exam
-$$$$
-Fall Bench 2
-10002
-Prof. Or Sasson
 83102,1,FALL,Obligatory
 Exam
 $$$$
-Fall Bench 3
-10003
-Prof. Or Sasson
-83103,1,FALL,Obligatory
+Calculus 1
+83112
+Dr. Erez Scheiner
+83101,1,FALL,Obligatory
+83102,1,FALL,Obligatory
 Exam
 $$$$
-Fall Bench 4
-10004
-Prof. Or Sasson
-83104,1,FALL,Obligatory
-Exam
-$$$$
-Fall Bench 5
-10005
-Prof. Or Sasson
-83105,1,FALL,Obligatory
-Exam
-$$$$
-Spring Bench 1
-20001
-Prof. Or Sasson
-83101,1,SPRI,Obligatory
-Exam
-$$$$
-Spring Bench 2
-20002
-Prof. Or Sasson
-83102,1,SPRI,Obligatory
-Exam
-$$$$
-Spring Bench 3
-20003
-Prof. Or Sasson
-83103,1,SPRI,Obligatory
-Exam
-$$$$
-Spring Bench 4
-20004
-Prof. Or Sasson
-83104,1,SPRI,Obligatory
-Exam
-$$$$
-Spring Bench 5
-20005
-Prof. Or Sasson
-83105,1,SPRI,Obligatory
-Exam
+Software Project
+83533
+Dr. Terry Bell
+83101,3,SPRI,Elective
+83108,2,SPRI,Obligatory
+Project
