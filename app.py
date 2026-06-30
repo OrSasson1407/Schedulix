@@ -27,7 +27,7 @@ if PROJECT_ROOT not in sys.path:
 from src.parser.CourseParser import CourseParser
 from src.parser.PeriodParser import PeriodParser
 from src.scheduler.BacktrackScheduler import BacktrackScheduler
-from src.scheduler.ScheduleSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
+from src.scheduler.SchedulerSorter import SORT_CRITERIA, METRIC_KEYS, sort_schedules
 from src.scheduler.whatif import WhatIfEngine
 from src.models.ExamPeriod import ExamPeriod
 from src.models.Constraints import SchedulingConstraints
@@ -131,14 +131,25 @@ def read_scroll_y():
 
 
 def redirect_screen(screen, anchor=None, scroll=None, **params):
+    if scroll is None and request.method == "POST":
+        scroll = read_scroll_y()
+
     q = {"screen": screen, **{k: v for k, v in params.items() if v is not None}}
-    if scroll is not None and int(scroll) > 0:
-        q["scroll"] = int(scroll)
+
+    try:
+        scroll_value = int(scroll or 0)
+    except (TypeError, ValueError):
+        scroll_value = 0
+
+    if scroll_value > 0:
+        q["scroll"] = scroll_value
+
     url = "/?" + urlencode(q)
+
     if anchor:
         url += "#" + anchor.lstrip("#")
-    return redirect(url)
 
+    return redirect(url)
 
 def get_effective_period(period):
     key = f"{period.semester}|{period.moed}"

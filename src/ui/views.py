@@ -288,6 +288,7 @@ def render_page(ctx: dict) -> str:
 
 <script>
 (function () {{
+  
   // Helper to show popup toast notifications
   function showToast(msg, type) {{
     var el = document.getElementById("toast");
@@ -428,18 +429,72 @@ def render_page(ctx: dict) -> str:
   }}
   document.querySelectorAll("form.history-restore-form").forEach(bindHistoryRestore);
 
-  // Restore scroll position logic
+    // Preserve scroll position for same-screen actions
   var content = document.querySelector(".content");
-  if (!content) return;
-  var scrollY = {scroll_y};
-  if (scrollY > 0) {{
-    content.scrollTop = scrollY;
-    return;
+
+  function getCurrentScrollY() {{
+    var c = document.querySelector(".content");
+    if (c) return Math.round(c.scrollTop || 0);
+    return Math.round(window.scrollY || 0);
   }}
-  var id = location.hash;
-  if (!id) return;
-  var el = document.querySelector(id);
-  if (el) el.scrollIntoView({{ block: "start", behavior: "instant" }});
+
+  function saveCurrentScroll() {{
+    var currentScreen = "{screen}";
+    var scrollKey = "schedulix-scroll-" + currentScreen;
+    sessionStorage.setItem(scrollKey, String(getCurrentScrollY()));
+  }}
+
+  function addScrollFieldToForm(form) {{
+    if (!form) return;
+    var field = form.querySelector('input[name="content_scroll_y"]');
+    if (!field) {{
+      field = document.createElement("input");
+      field.type = "hidden";
+      field.name = "content_scroll_y";
+      form.appendChild(field);
+    }}
+    field.value = String(getCurrentScrollY());
+  }}
+
+  if (content) {{
+    var currentScreen = "{screen}";
+    var scrollKey = "schedulix-scroll-" + currentScreen;
+
+    // Save scroll before normal form submissions
+    document.addEventListener("submit", function (e) {{
+      saveCurrentScroll();
+      addScrollFieldToForm(e.target);
+    }}, true);
+
+    // Save scroll before internal navigation links, such as calendar tabs, output pages, schedule jumps
+    document.addEventListener("click", function (e) {{
+      var link = e.target.closest("a");
+      if (!link) return;
+
+      var href = link.getAttribute("href") || "";
+      if (href.startsWith("/") || href.startsWith("?")) {{
+        saveCurrentScroll();
+      }}
+    }}, true);
+
+    // Restore scroll after reload
+    var scrollY = {scroll_y};
+    var savedScroll = sessionStorage.getItem(scrollKey);
+
+    window.addEventListener("load", function () {{
+      if (scrollY > 0) {{
+        content.scrollTop = scrollY;
+      }} else if (savedScroll !== null) {{
+        content.scrollTop = parseInt(savedScroll, 10) || 0;
+      }} else {{
+        var id = location.hash;
+        if (id) {{
+          var el = document.querySelector(id);
+          if (el) el.scrollIntoView({{ block: "start", behavior: "instant" }});
+        }}
+      }}
+    }});
+  }}
 }})();
   // Course detail modal
   (function() {{
@@ -608,10 +663,16 @@ def render_page(ctx: dict) -> str:
 
   function wifHide() {{ document.getElementById('wif-overlay').style.display = 'none'; }}
 
-  function wifApply() {{
+    function wifApply() {{
     if (!wifPending_) return;
     wifPost('/whatif/apply', wifPending_).then(function (data) {{
       if (!data.ok) {{ wifToast(data.error || 'Apply failed', 'err'); return; }}
+
+      var c = document.querySelector('.content');
+      if (c) {{
+        sessionStorage.setItem('schedulix-scroll-output', String(Math.round(c.scrollTop || 0)));
+      }}
+
       window.location.href = '/?screen=output';
     }}).catch(function () {{ wifToast('Apply failed', 'err'); }});
   }}
