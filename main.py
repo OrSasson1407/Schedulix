@@ -111,7 +111,7 @@ def main():
     # 2. Generate schedules
     print("\n[4/4] Generating all valid schedules (this may take a moment)...")
     scheduler = BacktrackScheduler()
-    schedules = scheduler.generate(relevant_courses, exam_periods)
+    schedules = list(scheduler.generate(relevant_courses, exam_periods))
     print(f"      Found {len(schedules)} valid schedule(s).")
 
     # 3. Write output
