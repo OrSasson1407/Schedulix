@@ -900,11 +900,8 @@ def render_page(ctx: dict) -> str:
     var d = block.dataset;
     rscPost('/reschedule/lock', {{ moed: d.moed, course_id: d.courseId }}).then(function (data) {{
       if (!data.ok) {{ rscToast(data.error || 'Lock failed', 'err'); return; }}
-      d.locked = data.locked ? '1' : '0';
-      block.classList.toggle('locked', data.locked);
-      block.setAttribute('draggable', data.locked ? 'false' : 'true');
-      btn.textContent = data.locked ? '🔒' : '🔓';
-      rscToast(data.locked ? 'Exam locked' : 'Exam unlocked', 'ok');
+      if (window.schedulixApplyOutputLive) window.schedulixApplyOutputLive(data);
+      if (data.flash && data.flash.msg) rscToast(data.flash.msg, data.flash.type || 'ok');
     }}).catch(function () {{ rscToast('Lock failed', 'err'); }});
   }}
 
@@ -1857,7 +1854,7 @@ def _render_output(ctx: dict) -> str:
         '<div class="export-bar">' +
         f'<a class="btn btn-primary" href="{export_href}"{export_disabled}>{export_label}</a>' +
         undo_btn +
-        '<span class="rsc-hint">💡 Drag any exam to another day to preview the reschedule impact · 🔒 lock to freeze an exam</span>' +
+        '<span class="rsc-hint">💡 Drag any exam to another day to preview the reschedule impact · 🔒 lock to pin an exam on its date and filter options</span>' +
         '</div>' +
         f'<div id="output-body">{out_body}</div>' +
         '</div>'

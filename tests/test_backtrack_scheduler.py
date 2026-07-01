@@ -62,6 +62,30 @@ class BacktrackScheduler(unittest.TestCase):
         schedules = list(self.scheduler.generate([c1], []))
 
         self.assertEqual(len(schedules), 0)
+
+    def test_pinned_course_stays_on_locked_date(self):
+        period = ExamPeriod("FALL", "Aleph", "29-01-2026", "31-01-2026")
+        schedules = list(self.scheduler.generate(
+            [self.course1, self.course2],
+            [period],
+            pinned={"83112": "2026-01-30"},
+        ))
+        self.assertTrue(schedules, "Should find schedules with a valid pin")
+        for sched in schedules:
+            dates = {
+                course.course_id: exam_date.date.strftime("%Y-%m-%d")
+                for (course, _), exam_date in sched.assignments.items()
+            }
+            self.assertEqual(dates["83112"], "2026-01-30")
+
+    def test_invalid_pin_yields_no_schedules(self):
+        period = ExamPeriod("FALL", "Aleph", "29-01-2026", "31-01-2026")
+        schedules = list(self.scheduler.generate(
+            [self.course1, self.course2],
+            [period],
+            pinned={"83112": "2026-02-01"},
+        ))
+        self.assertEqual(len(schedules), 0)
     
 if __name__ == '__main__':
     unittest.main()

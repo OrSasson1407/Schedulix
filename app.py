@@ -70,6 +70,10 @@ state = {
     "sort_criteria": [],
     # Exams locked by the user: set of "semester|moed_key|course_id".
     "locked_exams": set(),
+    # Pinned dates for locked exams: "semester|moed_key|course_id" -> "YYYY-MM-DD".
+    "locked_exam_dates": {},
+    # Full schedule lists saved before the first lock (restored when all locks cleared).
+    "schedule_backup": None,
     # User-defined holiday/event exclusions (for display on the calendar screen).
     "custom_events": [],
     # Undo stack of manual post-generation edits (drag-and-drop applies).
@@ -203,6 +207,8 @@ def clear_generated_results():
     state["bet_schedules"] = []
     state["edit_history"] = []
     state["locked_exams"] = set()
+    state["locked_exam_dates"] = {}
+    state["schedule_backup"] = None
     state["pagination"] = {}
     state["gen_job"] = {
         "running": False,
@@ -547,6 +553,134 @@ def toggle_day(semester, moed, date_str):
     return "excluded"
 
 
+def _schedule_matches_semester(sched, semester):
+    for (_, _), exam_date in sched.assignments.items():
+        if exam_date.semester == semester:
+            return True
+    return False
+
+
+def _filtered_courses():
+    selected_set = set(state["selected_programs"])
+    filtered = []
+    for course in state["courses"]:
+        matching = [p for p in course.programs if p.program_id in selected_set]
+        if matching:
+            c = copy.copy(course)
+            c.programs = matching
+            filtered.append(c)
+    return filtered
+
+
+def _ensure_schedule_backup():
+    if state.get("schedule_backup") is None:
+        state["schedule_backup"] = {
+            "aleph": snapshot_schedules(state["aleph_schedules"]),
+            "bet": snapshot_schedules(state["bet_schedules"]),
+        }
+
+
+def _restore_full_schedule_backup():
+    backup = state.get("schedule_backup")
+    if not backup:
+        return
+    state["aleph_schedules"] = snapshot_schedules(backup["aleph"])
+    state["bet_schedules"] = snapshot_schedules(backup["bet"])
+    state["schedule_backup"] = None
+
+
+def _restore_moed_semester(moed_key, semester):
+    backup = state.get("schedule_backup")
+    if not backup:
+        return
+    sched_key = f"{moed_key}_schedules"
+    backed = [s for s in backup[moed_key] if _schedule_matches_semester(s, semester)]
+    other = [s for s in state[sched_key] if not _schedule_matches_semester(s, semester)]
+    state[sched_key] = other + backed
+
+
+def _locks_for(semester, moed_key):
+    prefix = f"{semester}|{moed_key}|"
+    return {k for k in state.get("locked_exams", set()) if k.startswith(prefix)}
+
+
+def _pins_for(semester, moed_key):
+    pins = {}
+    for key in _locks_for(semester, moed_key):
+        date_str = state.get("locked_exam_dates", {}).get(key)
+        if not date_str:
+            continue
+        course_id = key.split("|", 2)[2]
+        pins[course_id] = date_str
+    return pins
+
+
+def _regenerate_moed_with_pins(semester, moed_key):
+    moed_name = "Aleph" if moed_key == "aleph" else "Bet"
+    pins = _pins_for(semester, moed_key)
+    effective_periods = [get_effective_period(p) for p in state["periods"]]
+    periods = [
+        p for p in effective_periods
+        if p.moed == moed_name and p.semester == semester
+    ]
+    if not periods:
+        return 0
+
+    constraints = SchedulingConstraints(state.get("constraints"))
+    sched = BacktrackScheduler()
+    new_schedules = []
+    for s in sched.generate(_filtered_courses(), periods, constraints, pinned=pins):
+        if s.assignments:
+            new_schedules.append(s)
+
+    sched_key = f"{moed_key}_schedules"
+    other = [s for s in state[sched_key] if not _schedule_matches_semester(s, semester)]
+    state[sched_key] = other + new_schedules
+    return len(new_schedules)
+
+
+def _reset_moed_pagination(semester, moed_key):
+    if semester and semester in state.get("pagination", {}):
+        state["pagination"][semester][moed_key] = 0
+
+
+def _course_date_on_displayed_schedule(semester, moed_key, course_id):
+    aleph, bet = schedules_for_semester(semester)
+    scheds = aleph if moed_key == "aleph" else bet
+    schedule = _displayed_schedule(scheds, semester, moed_key)
+    if schedule is None:
+        return None
+    moed_name = "Aleph" if moed_key == "aleph" else "Bet"
+    for (course, moed), exam_date in schedule.assignments.items():
+        if course.course_id == course_id and moed == moed_name:
+            return exam_date.date.strftime("%Y-%m-%d")
+    return None
+
+
+def _after_lock_toggle(semester, moed_key):
+    """Regenerate pinned options on lock, or restore full options on unlock."""
+    state["edit_history"] = []
+
+    if not state.get("locked_exams"):
+        _restore_full_schedule_backup()
+        apply_sort()
+        _reset_moed_pagination(semester, moed_key)
+        return "Restored all schedule options"
+
+    if _locks_for(semester, moed_key):
+        count = _regenerate_moed_with_pins(semester, moed_key)
+        apply_sort()
+        _reset_moed_pagination(semester, moed_key)
+        if count:
+            return f"Regenerated {count} schedule(s) with locked exam(s) pinned"
+        return "No valid schedules with the locked exam(s) on the chosen date(s)"
+
+    _restore_moed_semester(moed_key, semester)
+    apply_sort()
+    _reset_moed_pagination(semester, moed_key)
+    return "Restored all schedule options"
+
+
 def run_generation():
     selected_set = set(state["selected_programs"])
 
@@ -568,6 +702,8 @@ def run_generation():
     # A fresh run resets any manual edits / locks tied to the previous results.
     state["edit_history"] = []
     state["locked_exams"] = set()
+    state["locked_exam_dates"] = {}
+    state["schedule_backup"] = None
 
     # Build the active hard-constraint configuration once per generation run.
     constraints = SchedulingConstraints(state.get("constraints"))
@@ -924,7 +1060,7 @@ def reschedule_apply():
 
 @app.route("/reschedule/lock", methods=["POST"])
 def reschedule_lock():
-    """Toggles the lock state of a single exam (locked exams cannot be moved)."""
+    """Toggle exam lock; locked exams are pinned and schedule options are regenerated."""
     moed_key = (request.form.get("moed") or "aleph").lower()
     if moed_key not in ("aleph", "bet"):
         moed_key = "aleph"
@@ -933,15 +1069,36 @@ def reschedule_lock():
         return jsonify({"ok": False, "error": "Missing course id"}), 400
 
     active_sem = state.get("active_semester", "")
+    if not active_sem:
+        return jsonify({"ok": False, "error": "No active semester"}), 400
+
     key = f"{active_sem}|{moed_key}|{course_id}"
     locked = state["locked_exams"]
+    locked_dates = state.setdefault("locked_exam_dates", {})
+
     if key in locked:
         locked.discard(key)
+        locked_dates.pop(key, None)
         is_locked = False
     else:
+        pin_date = _course_date_on_displayed_schedule(active_sem, moed_key, course_id)
+        if not pin_date:
+            return jsonify({"ok": False, "error": "Could not find this exam on the current schedule"}), 400
+        _ensure_schedule_backup()
         locked.add(key)
+        locked_dates[key] = pin_date
         is_locked = True
-    return jsonify({"ok": True, "course_id": course_id, "locked": is_locked})
+
+    msg = _after_lock_toggle(active_sem, moed_key)
+    kind = "ok" if "No valid" not in msg else "err"
+    payload = {
+        "ok": True,
+        "course_id": course_id,
+        "locked": is_locked,
+        "flash": {"msg": msg, "type": kind},
+        **output_live_payload(),
+    }
+    return jsonify(payload)
 
 
 @app.route("/reschedule/undo", methods=["POST"])
@@ -1211,6 +1368,8 @@ def history_restore():
         state["period_overrides"] = copy.deepcopy(entry.get("period_overrides", {}))
         state["edit_history"] = []
         state["locked_exams"] = set()
+        state["locked_exam_dates"] = {}
+        state["schedule_backup"] = None
         apply_sort()
         state["gen_history"].append(state["gen_history"].pop(idx))
         flash_msg = "Previous run restored — programs, calendar, and schedules recovered"

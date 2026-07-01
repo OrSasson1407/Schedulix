@@ -16,6 +16,7 @@ import time
 import collections
 import heapq
 import itertools
+from datetime import datetime
 from .Scheduler import Scheduler
 from ..models.Schedule import Schedule
 
@@ -441,6 +442,20 @@ def _solve_period(
     yield from combine(0)
 
 
+def _pin_date_index(available_dates, date_str: str):
+    """Map YYYY-MM-DD to the index of that day in available_dates, or None."""
+    try:
+        target = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    for idx, date_obj in enumerate(available_dates):
+        raw = date_obj.date
+        day = raw.date() if hasattr(raw, "date") else raw
+        if day == target:
+            return idx
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Main scheduler class
 # ---------------------------------------------------------------------------
@@ -448,7 +463,7 @@ class BacktrackScheduler(Scheduler):
     TIME_LIMIT_SECONDS = 28
     _graph_cache: dict = {}
 
-    def generate(self, courses: list, exam_periods: list, constraints=None):
+    def generate(self, courses: list, exam_periods: list, constraints=None, pinned=None):
         exam_courses = [c for c in courses if c.is_exam_required()]
         if not exam_courses or not exam_periods:
             return
@@ -456,6 +471,7 @@ class BacktrackScheduler(Scheduler):
         # Optional user-defined hard constraints. A schedule that violates any
         # active constraint is dropped before it is ever yielded to the caller.
         apply_constraints = constraints is not None and constraints.any_enabled()
+        pinned = pinned or {}
 
         deadline   = time.monotonic() + self.TIME_LIMIT_SECONDS
         aborted    = [False]
@@ -509,6 +525,9 @@ class BacktrackScheduler(Scheduler):
                 for d_idx, date_obj in enumerate(available_dates):
                     if date_obj.semester in c_sems:
                         mask |= (1 << d_idx)
+                if c.course_id in pinned:
+                    pin_idx = _pin_date_index(available_dates, pinned[c.course_id])
+                    mask = (1 << pin_idx) if pin_idx is not None else 0
                 domains[i] = mask
 
             for assignment in _solve_period(n, adj, domains, deadline, aborted):
