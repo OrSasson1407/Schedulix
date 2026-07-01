@@ -63,6 +63,23 @@ class BacktrackScheduler(unittest.TestCase):
 
         self.assertEqual(len(schedules), 0)
 
+    def test_enumerates_all_valid_schedules_for_small_input(self):
+        """Two obligatory courses on three days → 3×2 = 6 complete valid schedules."""
+        period = ExamPeriod("FALL", "Aleph", "29-01-2026", "31-01-2026")
+        schedules = list(self.scheduler.generate([self.course1, self.course2], [period]))
+        self.assertEqual(len(schedules), 6)
+        signatures = set()
+        for sched in schedules:
+            self.assertTrue(sched.is_valid())
+            sig = tuple(
+                sorted(
+                    (course.course_id, exam_date.date.strftime("%Y-%m-%d"))
+                    for (course, _), exam_date in sched.assignments.items()
+                )
+            )
+            signatures.add(sig)
+        self.assertEqual(len(signatures), 6, "All yielded schedules must be distinct")
+
     def test_pinned_course_stays_on_locked_date(self):
         period = ExamPeriod("FALL", "Aleph", "29-01-2026", "31-01-2026")
         schedules = list(self.scheduler.generate(

@@ -24,6 +24,10 @@ class ExamPeriod(unittest.TestCase):
         with self.assertRaises(ValueError):
             TargetExamPeriod("WINTER", "Aleph", self.start, self.end)
 
+    def test_invalid_moed(self):
+        with self.assertRaises(ValueError):
+            TargetExamPeriod("FALL", "Delta", self.start, self.end)
+
     def test_get_available_dates(self):
         ep = TargetExamPeriod("FALL", "Aleph", self.start, self.end, self.excluded)
         available = ep.get_available_dates()

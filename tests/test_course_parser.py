@@ -121,5 +121,35 @@ class CourseParser(unittest.TestCase):
         self.assertEqual(corrected_courses[0].name, "Physics 1")
         self.assertEqual(corrected_courses[0].course_id, "83102")
 
+    def test_parse_record_with_no_valid_programs_returns_none(self):
+        record = (
+            "$$$$\n"
+            "Lonely Course\n"
+            "99999\n"
+            "Dr. Nobody\n"
+            "bad,line,here\n"
+            "Exam"
+        )
+        courses = self.parser._split_records(record)
+        self.assertIsNone(self.parser._parse_record(courses[0]))
+
+    def test_parse_invalid_program_line_is_skipped(self):
+        record = (
+            "$$$$\n"
+            "Mixed Course\n"
+            "88888\n"
+            "Dr. Mix\n"
+            "83101,1,FALL,Obligatory\n"
+            "only,three,parts\n"
+            "Exam"
+        )
+        courses = self.parser._split_records(record)
+        parsed = self.parser._parse_record(courses[0])
+        self.assertEqual(len(parsed.programs), 1)
+
+    def test_parse_invalid_program_values_returns_none(self):
+        line = "83101,not-a-year,FALL,Obligatory"
+        self.assertIsNone(self.parser._parse_program_line(line))
+
 if __name__ == '__main__':
     unittest.main()

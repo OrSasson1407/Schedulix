@@ -97,6 +97,26 @@ class PeriodParser(unittest.TestCase):
         self.assertEqual(len(periods), 1)
         self.assertEqual(len(periods[0].excluded_dates), 3)
 
+    def test_parse_invalid_semester_moed_line(self):
+        record = "$$$$\nFALL\n29-01-2026, 31-01-2026"
+        periods = self.parser._split_records(record)
+        self.assertIsNone(self.parser._parse_record(periods[0]))
+
+    def test_parse_invalid_date_range_line(self):
+        record = "$$$$\nFALL, Aleph\nonly-one-date"
+        periods = self.parser._split_records(record)
+        self.assertIsNone(self.parser._parse_record(periods[0]))
+
+    def test_parse_invalid_date_format(self):
+        record = "$$$$\nFALL, Aleph\n99-99-2026, 31-01-2026"
+        periods = self.parser._split_records(record)
+        self.assertIsNone(self.parser._parse_record(periods[0]))
+
+    def test_parse_exclusion_empty_line_returns_empty(self):
+        self.assertEqual(self.parser._parse_exclusion_line(""), [])
+
+    def test_parse_exclusion_unparseable_token_returns_empty(self):
+        self.assertEqual(self.parser._parse_exclusion_line("not-a-date"), [])
 
 if __name__ == '__main__':
     unittest.main()

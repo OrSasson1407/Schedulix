@@ -301,10 +301,12 @@ Schedulix/
 
 ## Testing & quality
 
-- **Automated:** 189+ unit/system/UI tests; CI runs flake8 + unittest (`.github/workflows/ci.yml`)
-- **Stress:** `tests/stress/` — large schedule constraint evaluation
-- **Manual / E2E:** `tests/manual/manual_ui_test_plan.md`, `tests/e2e/e2e_test_checklist.md` (browser interaction not automated in CI)
-- **Process (SRS §7):** Git, JIRA, Agile; code review summarized in project submission documents
+- **Automated:** 240+ unit/system/UI/app-route tests; CI runs flake8 + unittest (`.github/workflows/ci.yml`)
+- **Stress:** `tests/test_stress.py`, `tests/stress/test_large_input_performance.py`
+- **Manual / E2E:** `tests/manual/manual_ui_test_plan.md` — execute in browser; **record results** in `tests/manual/manual_test_results.md`
+- **E2E checklist:** `tests/e2e/e2e_test_checklist.md`
+- **Code review:** `CODE_REVIEW.md`
+- **Process (SRS §7):** Git, JIRA, Agile
 
 ---
 

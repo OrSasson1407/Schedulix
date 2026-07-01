@@ -6,6 +6,8 @@ The automated UI tests in this project verify rendered HTML views and server res
 
 This document records the manual GUI tests required for the professor's feedback.
 
+**Record results after each run in:** [`manual_test_results.md`](manual_test_results.md)
+
 ## Manual UI Test Summary
 
 | ID | Area | Type | Status | Evidence to Save |

@@ -72,15 +72,20 @@ class SystemTests(unittest.TestCase):
             schedules = list(self.scheduler.generate(exam_courses, periods))
             self.writer.write(schedules, output_file, selected_programs)
 
-            # 3. Assertions
+            # 3. Assertions — count, header, and per-schedule formatting
             self.assertTrue(os.path.exists(output_file), "System should generate an output file.")
-            self.assertTrue(len(schedules) > 0, "System should find valid schedules.")
+            self.assertEqual(len(schedules), 6, "Two obligatory courses on 3 days → 6 schedules.")
             
             with open(output_file, "r", encoding="utf-8") as f:
                 output_content = f.read()
                 self.assertIn("SCHEDULIX", output_content)
+                self.assertIn("Total Schedules   : 6", output_content)
+                self.assertIn("Selected Programs : 83101", output_content)
+                self.assertIn("Schedule #1", output_content)
+                self.assertIn("Schedule #6", output_content)
                 self.assertIn("Calculus 1", output_content)
                 self.assertIn("Physics 1", output_content)
+                self.assertIn("Dr. Erez", output_content)
 
     def test_system_no_matching_programs(self):
         """

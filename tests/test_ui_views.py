@@ -13,6 +13,8 @@ from src.ui.views import (
     render_page,
     format_generate_result,
     render_gen_history_html,
+    render_program_grid_html,
+    render_output_live,
 )
 
 
@@ -492,7 +494,201 @@ class TestUIViews(unittest.TestCase):
         self.assertIn('data-prog-id="83101"', html)
         self.assertIn('data-prog-id="83102"', html)
         self.assertGreaterEqual(html.count("selected"), 2)
-        
+
+    def test_settings_page_renders_constraints(self):
+        ctx = {
+            "screen": "settings",
+            "constraints": {
+                "mandatory_spacing": {"enabled": True, "k": 2},
+                "daily_capacity": {"enabled": False, "k": 3},
+            },
+        }
+        html = render_page(ctx)
+        self.assertIn("Scheduling Hard Constraints", html)
+        self.assertIn('action="/settings"', html)
+        self.assertIn("mandatory_spacing", html)
+
+    def test_input_drilldown_renders_course_table(self):
+        ctx = {
+            "screen": "input",
+            "courses_count": 2,
+            "periods_count": 1,
+            "selected_programs": ["83101"],
+            "programs": [{"id": "83101", "name": "Computer Engineering"}],
+            "drilldown": {
+                "prog_id": "83101",
+                "name": "Computer Engineering",
+                "year_filter": "",
+                "sem_filter": "",
+                "courses": [
+                    {
+                        "course_id": "10001",
+                        "name": "Algorithms",
+                        "instructor": "Dr. A",
+                        "year": 1,
+                        "semester": "FALL",
+                        "requirement": "Obligatory",
+                        "evaluation": "Exam",
+                    }
+                ],
+            },
+        }
+        html = render_page(ctx)
+        self.assertIn("Algorithms", html)
+        self.assertIn("course-table", html)
+        self.assertIn("View courses", html)
+
+    def test_input_page_no_programs_in_data(self):
+        ctx = {
+            "screen": "input",
+            "courses_count": 3,
+            "periods_count": 1,
+            "selected_programs": [],
+            "programs": [],
+        }
+        html = render_page(ctx)
+        self.assertIn("No programs found in data", html)
+
+    def test_output_page_with_schedule_entries(self):
+        ctx = {
+            "screen": "output",
+            "aleph_page": 0,
+            "bet_page": 0,
+            "aleph_total": 2,
+            "bet_total": 1,
+            "active_semester": "FALL",
+            "semesters": ["FALL"],
+            "sort_options": [
+                {"key": "min_mandatory_spacing", "label": "Min spacing", "desc": "desc"},
+            ],
+            "sort_criteria": ["min_mandatory_spacing"],
+            "schedule": {
+                "aleph_entries": [
+                    {
+                        "date": "2026-02-01",
+                        "course_id": "10001",
+                        "course_name": "Algorithms",
+                        "instructor": "Dr. A",
+                        "requirement": "Obligatory",
+                        "programs": ["83101"],
+                        "locked": False,
+                    }
+                ],
+                "bet_entries": [],
+            },
+        }
+        html = render_page(ctx)
+        self.assertIn("MOED ALEPH", html)
+        self.assertIn("Algorithms", html)
+        self.assertIn("Sort Schedules", html)
+        self.assertIn("Export All Semesters", html)
+        self.assertIn("rscDrag", html)
+
+    def test_output_page_generation_running_state(self):
+        ctx = {
+            "screen": "output",
+            "gen_running": True,
+            "aleph_total": 1,
+            "bet_total": 0,
+            "aleph_page": 0,
+            "bet_page": 0,
+        }
+        html = render_page(ctx)
+        self.assertIn("Generating schedules", html)
+        self.assertIn("gen-progress-bar", html)
+
+    def test_output_page_semester_switcher_with_multiple_semesters(self):
+        ctx = {
+            "screen": "output",
+            "semesters": ["FALL", "SPRI"],
+            "active_semester": "FALL",
+            "aleph_page": 0,
+            "bet_page": 0,
+            "aleph_total": 5,
+            "bet_total": 3,
+        }
+        html = render_page(ctx)
+        self.assertIn("sem-switcher", html)
+        self.assertIn("semester_view=FALL", html)
+        self.assertIn("semester_view=SPRI", html)
+
+    def test_calendar_custom_event_chips(self):
+        ctx = {
+            "screen": "calendar",
+            "aleph_periods": [],
+            "bet_periods": [],
+            "custom_events": [
+                {"name": "Purim", "start": "2026-03-02", "end": "2026-03-04",
+                 "aleph": True, "bet": False, "excluded": 3},
+            ],
+        }
+        html = render_page(ctx)
+        self.assertIn("Custom event exclusion", html)
+        self.assertIn("Purim", html)
+        self.assertIn("ce-chip", html)
+
+    def test_render_program_grid_html_ajax_fragment(self):
+        html = render_program_grid_html({
+            "courses_count": 1,
+            "selected_programs": [],
+            "programs": [{"id": "83101", "name": "Computer Engineering"}],
+        })
+        self.assertIn("program-card", html)
+        self.assertNotIn("<!DOCTYPE html>", html)
+
+    def test_render_output_live_returns_fragments(self):
+        fragments = render_output_live({
+            "gen_running": True,
+            "aleph_page": 0,
+            "bet_page": 0,
+            "aleph_total": 2,
+            "bet_total": 1,
+            "schedule": None,
+        })
+        self.assertIn("gen_progress_html", fragments)
+        self.assertIn("output_top_bar_html", fragments)
+        self.assertIn("output_body_html", fragments)
+        self.assertIn("Generating", fragments["output_body_html"])
+
+    def test_input_page_includes_live_generation_redirect(self):
+        ctx = {
+            "screen": "input",
+            "courses_count": 1,
+            "periods_count": 1,
+            "selected_programs": ["83101"],
+            "programs": [{"id": "83101", "name": "Computer Engineering"}],
+        }
+        html = render_page(ctx)
+        self.assertIn("generating=1", html)
+        self.assertIn("/generate/status", html)
+
+    def test_input_page_preserves_scroll_hidden_field_support(self):
+        ctx = {
+            "screen": "input",
+            "content_scroll_y": 420,
+            "courses_count": 0,
+            "periods_count": 0,
+            "selected_programs": [],
+            "programs": [],
+        }
+        html = render_page(ctx)
+        self.assertIn("scroll_y", html)
+        self.assertIn("restoreContentScroll", html)
+        self.assertIn("420", html)
+
+    def test_generation_history_marks_partial_runs(self):
+        history = [
+            {
+                "ts": datetime(2026, 1, 29, 10, 30),
+                "aleph_count": 1,
+                "bet_count": 0,
+                "programs": ["83101"],
+                "timed_out": True,
+            }
+        ]
+        html = render_gen_history_html(history)
+        self.assertIn("(partial)", html)
+
         
 if __name__ == "__main__":
     unittest.main()

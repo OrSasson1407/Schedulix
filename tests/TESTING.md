@@ -23,7 +23,8 @@ This document explains the testing strategy for Schedulix and directly addresses
 | System tests | Test parser → scheduler → output flow | `tests/test_system.py` | Optional screenshots |
 | End-to-end tests | Test complete user workflows | `tests/e2e/e2e_test_checklist.md`, partial automation in system/CLI tests | Yes for GUI browser flow |
 | UI view tests | Test rendered HTML and UI structure | `tests/test_ui_views.py` | Yes, because these do not click in a real browser |
-| Manual UI tests | Test browser behavior, buttons, scroll, popups, what-if actions | `tests/manual/manual_ui_test_plan.md` | Yes |
+| App route tests | Test Flask routes (limits, upload modes, history) | `tests/test_app_routes.py` | No |
+| Manual UI tests | Test browser behavior, buttons, scroll, popups, what-if actions | `tests/manual/manual_ui_test_plan.md` | Yes — record results in `tests/manual/manual_test_results.md` |
 | Stress/performance tests | Test large synthetic workloads and early scheduler yield | `tests/test_stress.py`, `tests/test_large_input_performance.py` | Optional GUI screenshot/video |
 | CI/CD | Run tests automatically on PR/push | `.github/workflows/ci.yml` | Screenshot of passing workflow recommended |
 
@@ -38,7 +39,7 @@ However, these tests do **not** fully automate a browser and do **not** physical
 This is why the project includes both:
 
 - automatic UI view tests in `tests/test_ui_views.py`, and
-- manual GUI tests in `tests/manual/manual_ui_test_plan.md`.
+- manual GUI tests in `tests/manual/manual_ui_test_plan.md` with **recorded results** in `tests/manual/manual_test_results.md`.
 
 ---
 
@@ -76,6 +77,23 @@ Professor comment: add an extended stress test for large numbers of schedules.
 
 ### Why the stress test samples schedules
 The number of possible valid schedules can be extremely large. A stress test should not enumerate every possible schedule because that can hang CI. Instead, it verifies that the scheduler can produce a valid sample quickly and safely.
+
+---
+
+## Automated coverage vs professor feedback
+
+| Feedback item | Status | Evidence |
+|---------------|--------|----------|
+| UI tests don't click browser | Documented | This file + `test_ui_views.py` |
+| Manual GUI tests recorded | Template provided | `manual/manual_test_results.md` — fill before submission |
+| 5-program limit | Automated | `tests/test_app_routes.py` |
+| Backtrack enumerates all solutions (small inputs) | Automated | `tests/test_backtrack_scheduler.py` |
+| System tests check counts & formatting | Automated | `tests/test_system.py` |
+| Extended stress test | Automated | `tests/test_stress.py`, `tests/stress/` |
+| CLI not broken by scheduler changes | Automated | `tests/test_cli.py` + `python main.py` |
+| Scroll position preserved | Manual M-07 + JS in `views.py` | |
+| Live output during generation | Manual M-08 + `/generate/status` | |
+| Overwrite/append documented | README § File loading | |
 
 ---
 
