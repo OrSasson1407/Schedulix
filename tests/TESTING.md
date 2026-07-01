@@ -32,6 +32,8 @@ This document explains the testing strategy for Schedulix and directly addresses
 
 ## Important Clarification About UI Testing
 
+Upload route tests in `tests/test_app_routes.py` patch `DATA_DIR` to a **temporary folder** so running tests does not modify your real `data/` files.
+
 The current automated UI tests check HTML rendering and view content. They verify that pages contain expected forms, messages, selected program cards, flash messages, branding, and layout elements.
 
 However, these tests do **not** fully automate a browser and do **not** physically click buttons like a user. Therefore, browser interaction must be checked manually using the manual UI test plan.

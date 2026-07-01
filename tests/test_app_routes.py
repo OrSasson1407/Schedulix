@@ -10,18 +10,32 @@ Covers professor feedback items that require server behaviour beyond HTML view t
 
 import copy
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from io import BytesIO
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app import (
-    app,
-    state,
-    relevant_gen_history,
-    input_fingerprint,
-)
+try:
+    import app as schedulix_app
+    from app import (
+        app,
+        state,
+        relevant_gen_history,
+        input_fingerprint,
+    )
+    _APP_AVAILABLE = True
+except ImportError:
+    schedulix_app = None
+    app = None
+    state = None
+    relevant_gen_history = None
+    input_fingerprint = None
+    _APP_AVAILABLE = False
+
 from src.models.Course import Course
 from src.models.Program import Program
 from src.models.Constraints import SchedulingConstraints
@@ -89,9 +103,36 @@ PERIOD_RECORD = (
 )
 
 
-class AppRouteTests(unittest.TestCase):
+class _IsolatedDataDirMixin:
+    """Patch DATA_DIR to a temp folder so upload tests never touch real data/ files."""
+
+    def setUp(self):
+        super().setUp()
+        self._tmpdir = tempfile.mkdtemp()
+        self._patches = [
+            patch.object(schedulix_app, "DATA_DIR", self._tmpdir),
+            patch.object(
+                schedulix_app,
+                "CACHE_PATH",
+                os.path.join(self._tmpdir, ".cache.pkl"),
+            ),
+            patch.object(schedulix_app, "save_cache"),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patches:
+            p.stop()
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+        super().tearDown()
+
+
+@unittest.skipUnless(_APP_AVAILABLE, "Flask required for app route tests (pip install flask)")
+class AppRouteTests(_IsolatedDataDirMixin, unittest.TestCase):
     def setUp(self):
         _fresh_state()
+        super().setUp()
         self.client = app.test_client()
         app.config["TESTING"] = True
 
@@ -237,9 +278,11 @@ class AppRouteTests(unittest.TestCase):
         self.assertIn("No courses loaded", rv.get_json()["error"])
 
 
-class AppRouteAppendDuplicateTests(unittest.TestCase):
+@unittest.skipUnless(_APP_AVAILABLE, "Flask required for app route tests (pip install flask)")
+class AppRouteAppendDuplicateTests(_IsolatedDataDirMixin, unittest.TestCase):
     def setUp(self):
         _fresh_state()
+        super().setUp()
         self.client = app.test_client()
         app.config["TESTING"] = True
 
